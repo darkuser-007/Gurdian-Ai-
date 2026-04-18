@@ -8,13 +8,13 @@
   --color-bg: #F8F9FA;
   --color-card: #FFFFFF;
   --color-border: #E9ECEF;
-  --color-accent: #3B82F6;
-  --color-accent-soft: #F1F5FE;
-  --color-danger: #EF4444;
-  --color-warning: #F59E0B;
-  --color-text-primary: #1A1C1E;
-  --color-text-secondary: #6C757D;
-  --color-text-tertiary: #ADB5BD;
+  --color-accent: #2563EB;
+  --color-accent-soft: #EFF6FF;
+  --color-danger: #DC2626;
+  --color-warning: #B45309;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4B5563;
+  --color-text-tertiary: #6B7280;
   --color-column: #F1F3F5;
 }
 

@@ -37,9 +37,20 @@ import {
   Play,
   Pause,
   FileAudio,
-  Trash2
+  Trash2,
+  Circle,
+  Square,
+  Download,
+  Wifi,
+  Signal,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  Headphones,
+  Speaker
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ResponsiveContainer, LineChart, Line, YAxis } from 'recharts';
 
 // --- Types ---
 
@@ -64,42 +75,111 @@ interface WorkflowStep {
 
 // --- Components ---
 
-const StatCard = ({ title, value, icon: Icon, trend }: { title: string, value: string | number, icon: any, trend?: string }) => (
-  <div className="bg-card border border-border p-5 rounded-xl shadow-sm">
-    <div className="flex justify-between items-start mb-3">
-      <span className="text-text-tertiary text-[10px] font-bold uppercase tracking-wider">{title}</span>
-      <Icon className="w-4 h-4 text-accent opacity-50" />
+const StatCard = ({ title, value, icon: Icon, trend, children, chart }: { title: string, value: string | number, icon: any, trend?: string, children?: React.ReactNode, chart?: React.ReactNode }) => (
+  <div className="bg-card border border-border p-5 rounded-xl shadow-sm h-full flex flex-col justify-between" role="region" aria-label={`${title} statistics`}>
+    <div>
+      <div className="flex justify-between items-start mb-3">
+        <span className="text-text-tertiary text-[11px] font-bold uppercase tracking-wider">{title}</span>
+        <Icon className="w-4 h-4 text-accent opacity-50" aria-hidden="true" />
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-end gap-2 text-nowrap">
+          <span className="text-2xl font-semibold tracking-tight text-text-primary">{value}</span>
+          {trend && <span className="text-[11px] text-accent font-semibold mb-1" aria-label={`Trend: ${trend}`}>{trend}</span>}
+        </div>
+        {chart && <div className="flex-1 h-8 min-w-[80px]" aria-hidden="true">{chart}</div>}
+      </div>
     </div>
-    <div className="flex items-end gap-2">
-      <span className="text-2xl font-semibold tracking-tight text-text-primary">{value}</span>
-      {trend && <span className="text-[10px] text-accent font-semibold mb-1">{trend}</span>}
-    </div>
+    {children && <div className="mt-4">{children}</div>}
   </div>
 );
 
 const SignalBadge = ({ label }: { label: string }) => (
-  <span className="px-2 py-1 rounded bg-accent-soft text-[10px] font-bold text-accent border border-accent/10 uppercase tracking-tighter">
+  <span className="px-2 py-1 rounded bg-accent-soft text-[11px] font-bold text-accent border border-accent/10 uppercase tracking-tighter">
     {label}
   </span>
 );
+
+const getQualityFromSNR = (snr: number) => {
+  if (snr > 40) return { label: 'Excellent', icon: Wifi, color: 'text-accent' };
+  if (snr > 32) return { label: 'Good', icon: SignalHigh, color: 'text-accent' };
+  if (snr > 22) return { label: 'Fair', icon: SignalMedium, color: 'text-warning' };
+  return { label: 'Poor', icon: SignalLow, color: 'text-danger' };
+};
 
 export default function App() {
   const [isCallActive, setIsCallActive] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [isSimulatedMode, setIsSimulatedMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'workflow' | 'history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'workflow' | 'history' | 'settings'>('dashboard');
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [confirmBlockId, setConfirmBlockId] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [autoBlockEnabled, setAutoBlockEnabled] = useState(false);
+  const [autoBlockThreshold, setAutoBlockThreshold] = useState(85);
+  const [currentCallNumber, setCurrentCallNumber] = useState<string | null>(null);
+  const [noiseReductionEnabled, setNoiseReductionEnabled] = useState(false);
+  const [noiseReductionIntensity, setNoiseReductionIntensity] = useState(0.5);
+  const [vizMode, setVizMode] = useState<'frequency' | 'waveform'>('frequency');
+  const [vizIntensity, setVizIntensity] = useState(1);
+  const [vizSpeed, setVizSpeed] = useState(1);
+  const [voiceControlEnabled, setVoiceControlEnabled] = useState(false);
+  
+  const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('default');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [historyFilter, setHistoryFilter] = useState('');
+  
+  const getDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      setAudioDevices(audioInputs);
+    } catch (err) {
+      console.warn("Unable to enumerate devices initially:", err);
+    }
+  };
+
+  const vizModeRef = useRef(vizMode);
+  const vizIntensityRef = useRef(vizIntensity);
+  const vizSpeedRef = useRef(vizSpeed);
+
+  // Load settings on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('guardian_settings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.autoBlockEnabled !== undefined) setAutoBlockEnabled(parsed.autoBlockEnabled);
+        if (parsed.autoBlockThreshold !== undefined) setAutoBlockThreshold(parsed.autoBlockThreshold);
+        if (parsed.noiseReductionEnabled !== undefined) setNoiseReductionEnabled(parsed.noiseReductionEnabled);
+        if (parsed.noiseReductionIntensity !== undefined) setNoiseReductionIntensity(parsed.noiseReductionIntensity);
+        if (parsed.selectedDeviceId !== undefined) setSelectedDeviceId(parsed.selectedDeviceId);
+        if (parsed.voiceControlEnabled !== undefined) setVoiceControlEnabled(parsed.voiceControlEnabled);
+      } catch (e) {
+        console.error("Failed to parse settings", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => { vizModeRef.current = vizMode; }, [vizMode]);
+  useEffect(() => { vizIntensityRef.current = vizIntensity; }, [vizIntensity]);
+  useEffect(() => { vizSpeedRef.current = vizSpeed; }, [vizSpeed]);
+
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const fileAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const [dashboardStats, setDashboardStats] = useState({
     callsMonitored: 0,
     syntheticDetected: 0,
     accuracyRate: 0,
-    meanLatency: 0
+    meanLatency: 0,
+    snr: 48
   });
   const [riskScore, setRiskScore] = useState(0);
   const [history, setHistory] = useState<DetectionResult[]>([
@@ -125,24 +205,10 @@ export default function App() {
     }
   ]);
 
-  // Handle WebSocket for Live Stats
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socketUrl = `${protocol}//${window.location.host}`;
-    const socket = new WebSocket(socketUrl);
-
-    socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'STATS_UPDATE') {
-        setDashboardStats(data.data);
-      }
-    };
-
-    socket.onerror = (error) => console.error('WebSocket Error:', error);
-    socket.onclose = () => console.log('WebSocket Connection Closed');
-
-    return () => socket.close();
-  }, []);
+  const filteredHistory = useMemo(() => {
+    if (!historyFilter) return history;
+    return history.filter(item => item.phoneNumber.toLowerCase().includes(historyFilter.toLowerCase()));
+  }, [history, historyFilter]);
 
   // Handle Notification Permission
   useEffect(() => {
@@ -150,6 +216,120 @@ export default function App() {
       setNotificationPermission(Notification.permission);
     }
   }, []);
+
+  // Handle Audio Device Enumeration
+  useEffect(() => {
+    getDevices();
+    navigator.mediaDevices.addEventListener('devicechange', getDevices);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', getDevices);
+  }, []);
+
+  // Handle Auto-Save for Settings
+  useEffect(() => {
+    // Skip initial load
+    const isInitialLoad = !autoBlockEnabled && autoBlockThreshold === 85 && !noiseReductionEnabled && noiseReductionIntensity === 0.5 && selectedDeviceId === 'default';
+    if (isInitialLoad) return;
+
+    setSaveStatus('saving');
+    const timer = setTimeout(() => {
+      // Simulate persistence (e.g., localStorage)
+      localStorage.setItem('guardian_settings', JSON.stringify({
+        autoBlockEnabled,
+        autoBlockThreshold,
+        noiseReductionEnabled,
+        noiseReductionIntensity,
+        selectedDeviceId,
+        voiceControlEnabled
+      }));
+      setSaveStatus('saved');
+      
+      // Reset status after a delay
+      const resetTimer = setTimeout(() => setSaveStatus('idle'), 2000);
+      return () => clearTimeout(resetTimer);
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled]);
+
+  // Handle Voice Commands
+  useEffect(() => {
+    if (!voiceControlEnabled) return;
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error("Speech Recognition not supported in this browser.");
+      return;
+    }
+
+    let recognition: any = null;
+    let shouldRestart = true;
+
+    const initRecognition = () => {
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        console.log("Voice Command System: Active & Listening...");
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+        console.log("Voice Command Recognized:", transcript);
+
+        if (transcript.includes('start analysis') || transcript.includes('begin monitoring')) {
+          setIsCallActive(true);
+        } else if (transcript.includes('stop analysis') || transcript.includes('end monitoring')) {
+          setIsCallActive(false);
+        } else if (transcript.includes('frequency mode')) {
+          setVizMode('frequency');
+        } else if (transcript.includes('waveform mode')) {
+          setVizMode('waveform');
+        } else if (transcript.includes('go to dashboard')) {
+          setActiveTab('dashboard');
+        } else if (transcript.includes('view logs') || transcript.includes('open history')) {
+          setActiveTab('history');
+        } else if (transcript.includes('open settings')) {
+          setActiveTab('settings');
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech Recognition Error:", event.error);
+        if (event.error === 'not-allowed') {
+          shouldRestart = false;
+          setVoiceControlEnabled(false);
+        }
+      };
+
+      recognition.onend = () => {
+        console.log("Voice Command System: Session ended.");
+        if (shouldRestart && voiceControlEnabled) {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.warn("Could not auto-restart recognition:", e);
+          }
+        }
+      };
+
+      try {
+        recognition.start();
+      } catch (err) {
+        console.error("Speech Recognition Start Error:", err);
+      }
+    };
+
+    initRecognition();
+
+    return () => {
+      shouldRestart = false;
+      if (recognition) {
+        recognition.stop();
+      }
+    };
+  }, [voiceControlEnabled]);
 
   const requestNotificationPermission = async () => {
     if (!("Notification" in window)) return;
@@ -177,6 +357,18 @@ export default function App() {
     setConfirmBlockId(null);
   };
 
+  const deleteHistoryItem = (id: string) => {
+    setHistory(prev => prev.filter(item => item.id !== id));
+  };
+
+  const resetSettings = () => {
+    setAutoBlockEnabled(false);
+    setAutoBlockThreshold(85);
+    setNoiseReductionEnabled(false);
+    setNoiseReductionIntensity(0.5);
+    setSelectedDeviceId('default');
+  };
+
   const handleBlockClick = (id: string, currentlyBlocked: boolean) => {
     if (currentlyBlocked) {
       // Unblocking doesn't necessarily need confirmation in this UI, but we can toggle it
@@ -190,6 +382,28 @@ export default function App() {
     history.find(item => item.id === confirmBlockId),
     [confirmBlockId, history]
   );
+
+  const riskTrendData = useMemo(() => {
+    // Generate a trend for the last hour (60 points)
+    // We'll use actual history first, then pad with random-looking but stable data
+    const lastHour = Date.now() - 3600000;
+    const historicalPoints = history
+      .filter(item => item.timestamp.getTime() > lastHour)
+      .map(item => ({ value: item.riskScore, time: item.timestamp.getTime() }));
+
+    // For better visualization, let's create a 30-point trend
+    const points = 30;
+    const now = Date.now();
+    const result = [];
+    for (let i = 0; i < points; i++) {
+        const time = now - (points - i) * 120000; // past 60 mins in 2-min intervals
+        // Find existing history near this time or use current/simulated risk
+        const matchingHistory = historicalPoints.find(h => Math.abs(h.time - time) < 300000);
+        const val = matchingHistory ? matchingHistory.value : (riskScore > 0 && i > points - 5 ? riskScore : 10 + Math.random() * 20);
+        result.push({ value: val });
+    }
+    return result;
+  }, [history, riskScore]);
 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([
     { id: '1', title: 'Phone State Observer', description: 'Monitoring OFFHOOK signal', status: 'idle', icon: <Phone /> },
@@ -210,6 +424,11 @@ export default function App() {
   useEffect(() => {
     let interval: any;
     if (isCallActive) {
+      // Assign a simulated caller identity if not present
+      if (!currentCallNumber) {
+        setCurrentCallNumber(`+1 (${Math.floor(200 + Math.random() * 700)}) ${Math.floor(100 + Math.random() * 899)}-${Math.floor(1000 + Math.random() * 8999)}`);
+      }
+
       setWorkflowSteps(prev => prev.map(s => {
         if (s.id === '1') return { ...s, status: 'completed' };
         if (s.id === '2') return { ...s, status: 'completed' };
@@ -221,8 +440,20 @@ export default function App() {
       startAudioViz();
 
       interval = setInterval(() => {
-        const newScore = Math.floor(Math.random() * 30) + (Math.random() > 0.8 ? 60 : 10);
+        const newScore = Math.floor(Math.random() * 35) + (Math.random() > 0.82 ? 62 : 8);
         setRiskScore(newScore);
+
+        setDashboardStats(prev => ({
+          ...prev,
+          snr: Math.min(50, Math.max(12, prev.snr + (Math.random() * 6 - 3)))
+        }));
+
+        // Automated Mitigation Strategy
+        if (autoBlockEnabled && newScore >= autoBlockThreshold) {
+          setIsCallActive(false);
+          // In a real app, we would add the currentCallNumber to the blocklist here
+          return;
+        }
 
         if (newScore > 75) {
           sendOSNotification(newScore, 'DEEPFAKE');
@@ -240,13 +471,14 @@ export default function App() {
     } else {
       setWorkflowSteps(prev => prev.map(s => ({ ...s, status: 'idle' })));
       setRiskScore(0);
+      setCurrentCallNumber(null);
       stopAudioViz();
     }
     return () => {
       clearInterval(interval);
       stopAudioViz();
     };
-  }, [isCallActive]);
+  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -304,16 +536,122 @@ export default function App() {
     setIsCallActive(false);
   };
 
+  const startRecording = async () => {
+    try {
+      if (mediaStreamRef.current) {
+        // Stop current tracks if they don't match selected device
+        const currentTracks = mediaStreamRef.current.getAudioTracks();
+        if (currentTracks.length > 0 && currentTracks[0].getSettings().deviceId !== selectedDeviceId) {
+           mediaStreamRef.current.getTracks().forEach(track => track.stop());
+           mediaStreamRef.current = null;
+        }
+      }
+
+      if (!mediaStreamRef.current) {
+        const constraints = { 
+          audio: selectedDeviceId === 'default' ? true : { deviceId: { exact: selectedDeviceId } } 
+        };
+        mediaStreamRef.current = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!isCallActive) setIsCallActive(true);
+      }
+
+      const recorder = new MediaRecorder(mediaStreamRef.current);
+      mediaRecorderRef.current = recorder;
+      recordedChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          recordedChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `guardian-capture-${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Recording error:", err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  const exportToCSV = () => {
+    const headers = ['Timestamp', 'Origin', 'Risk Score', 'Duration', 'Verdict'];
+    const rows = history.map(item => [
+      `"${item.timestamp.toLocaleString()}"`,
+      `"${item.phoneNumber}"`,
+      `"${item.riskScore}%"`,
+      `"${item.duration}"`,
+      `"${getVerdict(item.riskScore).label}"`
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `guardian-detection-log-${Date.now()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const startAudioViz = async () => {
     setPermissionError(null);
     try {
-      // Check if we can get user media
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      source.connect(analyserRef.current);
+      if (mediaStreamRef.current && !isPlayingFile) {
+        const currentTracks = mediaStreamRef.current.getAudioTracks();
+        if (currentTracks.length > 0 && currentTracks[0].getSettings().deviceId !== selectedDeviceId) {
+           mediaStreamRef.current.getTracks().forEach(track => track.stop());
+           mediaStreamRef.current = null;
+        }
+      }
+
+      if (!mediaStreamRef.current && !isPlayingFile) {
+        const constraints = { 
+          audio: selectedDeviceId === 'default' ? true : { deviceId: { exact: selectedDeviceId } } 
+        };
+        mediaStreamRef.current = await navigator.mediaDevices.getUserMedia(constraints);
+        // Refresh devices to get labels now that permission is granted
+        getDevices();
+      }
+      
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      const stream = mediaStreamRef.current;
+      let source;
+      
+      if (isPlayingFile && analyserRef.current) {
+        // We already have source and analyser connected in playUploadedFile
+      } else if (stream) {
+        source = audioContextRef.current.createMediaStreamSource(stream);
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 256;
+        source.connect(analyserRef.current);
+      }
+
+      if (!analyserRef.current) return;
 
       const bufferLength = analyserRef.current.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -324,26 +662,48 @@ export default function App() {
         const width = canvasRef.current.width;
         const height = canvasRef.current.height;
 
-        analyserRef.current.getByteFrequencyData(dataArray);
+        const mode = vizModeRef.current;
+        const intensity = vizIntensityRef.current;
+        const effectiveVolume = (isMuted ? 0 : volume) * intensity;
 
         ctx.clearRect(0, 0, width, height);
         
-        const effectiveVolume = isMuted ? 0 : volume;
-        const barWidth = (width / bufferLength) * 2.5;
-        let barHeight;
-        let x = 0;
+        // Color based on risk
+        let color = '#3B82F6'; 
+        if (riskScore > 75) color = '#EF4444';
+        else if (riskScore > 40) color = '#F59E0B';
 
-        for (let i = 0; i < bufferLength; i++) {
-          barHeight = (dataArray[i] / 255) * height * effectiveVolume;
-          
-          // Color based on risk
-          let color = '#3B82F6'; 
-          if (riskScore > 75) color = '#EF4444';
-          else if (riskScore > 40) color = '#F59E0B';
+        if (mode === 'frequency') {
+          analyserRef.current.getByteFrequencyData(dataArray);
+          const barWidth = (width / bufferLength) * 2.5;
+          let x = 0;
 
-          ctx.fillStyle = color;
-          ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-          x += barWidth + 1;
+          for (let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * height * effectiveVolume;
+            ctx.fillStyle = color;
+            ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+            x += barWidth + 1;
+          }
+        } else {
+          analyserRef.current.getByteTimeDomainData(dataArray);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+
+          const sliceWidth = width / bufferLength;
+          let x = 0;
+
+          for (let i = 0; i < bufferLength; i++) {
+            const v = dataArray[i] / 128.0;
+            const y = (v * height / 2) * effectiveVolume + (height / 2) * (1 - effectiveVolume);
+            
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+            
+            x += sliceWidth;
+          }
+
+          ctx.stroke();
         }
 
         animationFrameRef.current = requestAnimationFrame(draw);
@@ -352,7 +712,6 @@ export default function App() {
       draw();
     } catch (err: any) {
       console.error("Microphone access denied or error:", err);
-      // Fallback to SIMULATED signal if real mic fails, so the user can still see the visualizer
       setIsSimulatedMode(true);
       startSimulatedViz();
       
@@ -370,25 +729,44 @@ export default function App() {
       const width = canvasRef.current.width;
       const height = canvasRef.current.height;
 
+      const mode = vizModeRef.current;
+      const intensity = vizIntensityRef.current;
+      const speed = vizSpeedRef.current;
+      const effectiveVolume = (isMuted ? 0 : volume) * intensity;
+
       ctx.clearRect(0, 0, width, height);
       
-      const effectiveVolume = isMuted ? 0 : volume;
-      const bars = 64;
-      const barWidth = (width / bars) * 2.5;
-      let x = 0;
+      let color = '#3B82F6';
+      if (riskScore > 75) color = '#EF4444';
+      else if (riskScore > 40) color = '#F59E0B';
 
-      for (let i = 0; i < bars; i++) {
-        // Random motion that looks like speech patterns
-        const barHeight = (Math.sin(Date.now() / 100 + i) * 10 + Math.random() * 20 + 20) * (height / 100) * effectiveVolume;
-        
-        let color = '#3B82F6';
-        if (riskScore > 75) color = '#EF4444';
-        else if (riskScore > 40) color = '#F59E0B';
-
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.4;
-        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-        x += barWidth + 1;
+      if (mode === 'frequency') {
+        const bars = 64;
+        const barWidth = (width / bars) * 2.5;
+        let x = 0;
+        for (let i = 0; i < bars; i++) {
+          const barHeight = (Math.sin((Date.now() * speed) / 100 + i) * 10 + Math.random() * 20 + 20) * (height / 100) * effectiveVolume;
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.4;
+          ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+          x += barWidth + 1;
+        }
+      } else {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        const segments = 100;
+        const sliceWidth = width / segments;
+        let x = 0;
+        for (let i = 0; i <= segments; i++) {
+          const v = Math.sin((Date.now() * speed) / 150 + i * 0.2) * Math.cos((Date.now() * speed) / 400 + i * 0.1);
+          const y = (v * height / 3) * effectiveVolume + (height / 2);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.stroke();
       }
 
       animationFrameRef.current = requestAnimationFrame(draw);
@@ -406,6 +784,15 @@ export default function App() {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(console.error);
         audioContextRef.current = null;
+      }
+      // Stop recording if active
+      if (isRecording) {
+        stopRecording();
+      }
+      // Stop all tracks
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
       }
     }
   };
@@ -427,27 +814,38 @@ export default function App() {
           <h1 className="font-bold text-lg leading-tight tracking-tight text-text-primary uppercase italic">Guardian</h1>
         </div>
 
-        <nav className="flex flex-col gap-1">
+        <nav className="flex flex-col gap-1" aria-label="Main Navigation">
           <button 
             onClick={() => setActiveTab('dashboard')}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'dashboard' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
+            aria-current={activeTab === 'dashboard' ? 'page' : undefined}
           >
-            <LayoutDashboard className="w-4 h-4" />
+            <LayoutDashboard className="w-4 h-4" aria-hidden="true" />
             Dashboard
           </button>
           <button 
             onClick={() => setActiveTab('workflow')}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'workflow' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
+            aria-current={activeTab === 'workflow' ? 'page' : undefined}
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" aria-hidden="true" />
             Workflow
           </button>
           <button 
             onClick={() => setActiveTab('history')}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'history' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
+            aria-current={activeTab === 'history' ? 'page' : undefined}
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4" aria-hidden="true" />
             Detection Log
+          </button>
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'settings' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
+            aria-current={activeTab === 'settings' ? 'page' : undefined}
+          >
+            <Settings className="w-4 h-4" aria-hidden="true" />
+            Settings
           </button>
         </nav>
 
@@ -475,19 +873,51 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <div className="hidden lg:flex items-center gap-3 px-4 py-2 bg-bg rounded-xl border border-border">
+              <div className="flex flex-col items-end">
+                <span className="text-[11px] font-bold text-text-tertiary uppercase tracking-wider">Call Recording</span>
+                <span className={`text-[11px] font-bold uppercase flex items-center gap-1.5 ${isRecording ? 'text-danger' : 'text-text-secondary'}`}>
+                  {isRecording && <span className="w-1.5 h-1.5 rounded-full bg-danger animate-pulse" />}
+                  {isRecording ? 'Recording Active' : 'Auto-Capture Off'}
+                </span>
+              </div>
+              <button 
+                onClick={() => isRecording ? stopRecording() : startRecording()}
+                className={`w-10 h-5 rounded-full relative transition-all ${isRecording ? 'bg-danger/10 border border-danger/20' : 'bg-bg border border-border'}`}
+                aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
+                aria-pressed={isRecording}
+              >
+                <motion.div 
+                  animate={{ 
+                    x: isRecording ? 22 : 2,
+                    backgroundColor: isRecording ? '#EF4444' : '#6B7280'
+                  }}
+                  className="absolute top-0.5 w-3.5 h-3.5 rounded-full shadow-sm"
+                />
+              </button>
+            </div>
+
             <button 
               onClick={requestNotificationPermission}
               className={`p-2 rounded-full transition-colors relative ${notificationPermission === 'granted' ? 'text-accent' : 'text-text-secondary hover:bg-bg'}`}
               title={notificationPermission === 'granted' ? 'OS Notifications Active' : 'Enable OS Notifications'}
+              aria-label="Toggle system notifications"
             >
-               <Bell className="w-5 h-5" />
+               <Bell className="w-5 h-5" aria-hidden="true" />
                {notificationPermission === 'granted' ? (
                  <span className="absolute top-2 right-2 w-2 h-2 bg-accent rounded-full border border-white" />
                ) : (
                  <span className="absolute top-2 right-2 w-2 h-2 bg-danger rounded-full border border-white" />
                )}
             </button>
-            <button className="bg-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm hover:brightness-110 px-6">
+            <button 
+              onClick={() => {
+                if (activeTab !== 'dashboard') setActiveTab('dashboard');
+                setIsCallActive(true);
+              }}
+              className="bg-accent text-white px-5 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider shadow-sm hover:brightness-110 px-6 transition-all active:scale-95"
+              aria-label="Start new simulation or audit"
+            >
                + New Action
             </button>
           </div>
@@ -504,11 +934,56 @@ export default function App() {
                 className="space-y-8"
               >
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                   <StatCard title="Calls Monitored" value={dashboardStats.callsMonitored.toLocaleString()} icon={Phone} trend="+12%" />
                   <StatCard title="Synthetic Detected" value={dashboardStats.syntheticDetected.toLocaleString()} icon={ShieldAlert} trend="+2%" />
                   <StatCard title="Accuracy Rate" value={`${dashboardStats.accuracyRate}%`} icon={ShieldCheck} />
-                  <StatCard title="Mean Latency" value={`${dashboardStats.meanLatency}ms`} icon={Zap} trend="-4ms" />
+                  <StatCard 
+                    title="Mean Latency" 
+                    value={`${dashboardStats.meanLatency}ms`} 
+                    icon={Zap} 
+                    trend="-4ms"
+                    chart={
+                      <div className="h-full w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={riskTrendData}>
+                            <Line 
+                              type="monotone" 
+                              dataKey="value" 
+                              stroke="#3B82F6" 
+                              strokeWidth={2} 
+                              dot={false} 
+                              isAnimationActive={false}
+                            />
+                            <YAxis hide domain={[0, 100]} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                        <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-tighter opacity-60 text-right -mt-1">
+                          Risk Trend
+                        </div>
+                      </div>
+                    }
+                  />
+                  {(() => {
+                    const quality = getQualityFromSNR(dashboardStats.snr);
+                    return (
+                      <StatCard title="Signal Quality" value={quality.label} icon={quality.icon}>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {[1, 2, 3, 4].map((step, i) => {
+                            const thresholds = [0, 22, 32, 40];
+                            const isActive = dashboardStats.snr >= thresholds[i];
+                            return (
+                              <div 
+                                key={step} 
+                                className={`h-1 flex-1 rounded-full transition-all duration-500 ${isActive ? (quality.color === 'text-accent' ? 'bg-accent' : (quality.color === 'text-warning' ? 'bg-warning' : 'bg-danger')) : 'bg-border'}`} 
+                              />
+                            );
+                          })}
+                          <span className="text-[9px] font-mono text-text-tertiary ml-1">{Math.round(dashboardStats.snr)}dB</span>
+                        </div>
+                      </StatCard>
+                    );
+                  })()}
                 </div>
 
                 {/* Simulation Area */}
@@ -519,19 +994,69 @@ export default function App() {
                         {/* Simulation Visual */}
                         <div className="flex-1 space-y-8">
                           <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold tracking-tight text-text-primary">
-                              Live Signal Processing
-                              {isCallActive && <span className="ml-2 inline-flex h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
-                            </h3>
+                            <div className="flex flex-col">
+                              <h3 className="text-lg font-bold tracking-tight text-text-primary">
+                                Live Signal Processing
+                                {isCallActive && <span className="ml-2 inline-flex h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
+                              </h3>
+                              {isCallActive && currentCallNumber && (
+                                <span className="text-[10px] font-mono text-text-tertiary mt-0.5">Origin: {currentCallNumber}</span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-3">
+                              {/* Viz Config */}
+                              <div className="flex items-center gap-2.5 bg-bg/40 border border-border px-3 py-1.5 rounded-xl shadow-inner">
+                                <div className="flex bg-bg border border-border rounded-lg p-0.5">
+                                  <button
+                                    onClick={() => setVizMode('frequency')}
+                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'frequency' ? 'bg-white shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+                                    aria-label="Frequency Spectrum Mode"
+                                    title="Frequency Spectrum View"
+                                  >
+                                    <Activity className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => setVizMode('waveform')}
+                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'waveform' ? 'bg-white shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+                                    aria-label="Waveform Mode"
+                                    title="Waveform View"
+                                  >
+                                    <Zap className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="h-4 w-[1px] bg-border mx-1" />
+
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] font-bold text-text-tertiary uppercase tracking-tighter leading-none">Intensity</span>
+                                  <input 
+                                    type="range" min="0.5" max="2" step="0.1" 
+                                    value={vizIntensity} onChange={(e) => setVizIntensity(parseFloat(e.target.value))}
+                                    className="w-14 h-1 bg-border rounded-full appearance-none cursor-pointer accent-accent"
+                                    aria-label="Visualization Intensity scale"
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[10px] font-bold text-text-tertiary uppercase tracking-tighter leading-none">Speed</span>
+                                  <input 
+                                    type="range" min="0.2" max="3" step="0.1" 
+                                    value={vizSpeed} onChange={(e) => setVizSpeed(parseFloat(e.target.value))}
+                                    className="w-14 h-1 bg-border rounded-full appearance-none cursor-pointer accent-accent"
+                                    aria-label="Visualization Speed scale"
+                                  />
+                                </div>
+                              </div>
+
                               {isCallActive && (
                                 <div className="flex items-center gap-1.5 bg-bg/50 border border-border rounded-lg p-1.5 shadow-inner">
                                   <button 
                                     onClick={() => setVolume(v => Math.max(0, v - 0.1))}
                                     className="p-1 hover:bg-bg rounded transition-colors text-text-tertiary"
                                     title="Decrease Volume"
+                                    aria-label="Decrease Volume"
                                   >
-                                    <Minus className="w-3.5 h-3.5" />
+                                    <Minus className="w-3.5 h-3.5" aria-hidden="true" />
                                   </button>
                                   <div className="w-16 h-1 bg-border rounded-full overflow-hidden mx-1">
                                     <motion.div 
@@ -543,19 +1068,23 @@ export default function App() {
                                     onClick={() => setVolume(v => Math.min(1, v + 0.1))}
                                     className="p-1 hover:bg-bg rounded transition-colors text-text-tertiary"
                                     title="Increase Volume"
+                                    aria-label="Increase Volume"
                                   >
-                                    <Plus className="w-3.5 h-3.5" />
+                                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                                   </button>
                                   <div className="w-[1px] h-3 bg-border mx-1" />
                                   <button 
                                     onClick={() => setIsMuted(!isMuted)}
                                     className={`p-1 rounded transition-colors ${isMuted ? 'text-danger bg-danger/10' : 'text-text-tertiary hover:bg-bg'}`}
                                     title={isMuted ? 'Unmute' : 'Mute'}
+                                    aria-label={isMuted ? 'Unmute' : 'Mute'}
+                                    aria-pressed={isMuted}
                                   >
-                                    {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                                    {isMuted ? <VolumeX className="w-3.5 h-3.5" aria-hidden="true" /> : <Volume2 className="w-3.5 h-3.5" aria-hidden="true" />}
                                   </button>
                                 </div>
                               )}
+
                               {isCallActive ? (
                                 <button 
                                   onClick={() => {
@@ -563,6 +1092,7 @@ export default function App() {
                                     if (isPlayingFile) stopFilePlayback();
                                   }}
                                   className="bg-danger/10 text-danger px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-danger/10"
+                                  aria-label={isPlayingFile ? 'Stop Audio Analysis' : 'Stop Live Agent Simulation'}
                                 >
                                   <PhoneOff className="w-3.5 h-3.5 inline mr-2" /> 
                                   {isPlayingFile ? 'Stop Analysis' : 'Stop Agent'}
@@ -577,6 +1107,7 @@ export default function App() {
                                     }
                                   }}
                                   className="bg-accent text-white px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
+                                  aria-label={uploadedFile ? 'Run Deepfake Audit on uploaded file' : 'Start real-time deepfake analysis'}
                                 >
                                   {uploadedFile ? <Play className="w-3.5 h-3.5 inline mr-2" /> : <Phone className="w-3.5 h-3.5 inline mr-2" />}
                                   {uploadedFile ? 'Run Audit' : 'Start Analysis'}
@@ -782,11 +1313,12 @@ export default function App() {
                                   onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
                                   title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
+                                  aria-label={item.isBlocked ? 'Blocked number details' : 'Block this number'}
                                 >
-                                  <Ban className="w-4 h-4" />
+                                  <Ban className="w-4 h-4" aria-hidden="true" />
                                 </button>
-                                <button className="p-2 transition-colors hover:bg-bg rounded-lg text-text-tertiary">
-                                  <ArrowRight className="w-4 h-4" />
+                                <button className="p-2 transition-colors hover:bg-bg rounded-lg text-text-tertiary" aria-label="View details">
+                                  <ArrowRight className="w-4 h-4" aria-hidden="true" />
                                 </button>
                               </div>
                             </div>
@@ -934,70 +1466,397 @@ export default function App() {
                 <div className="flex items-center justify-between mb-8">
                   <h3 className="text-2xl font-bold tracking-tight text-text-primary">System Activity Logs</h3>
                   <div className="flex gap-2">
+                    <button 
+                      onClick={exportToCSV}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-bg border border-border rounded-xl text-xs font-bold uppercase tracking-wider text-text-secondary hover:bg-white hover:border-accent/40 transition-all shadow-sm"
+                      aria-label="Export detection log to CSV"
+                    >
+                      <Download className="w-4 h-4" aria-hidden="true" />
+                      <span>Export CSV</span>
+                    </button>
                     <div className="relative">
                       <input 
                         type="text" 
+                        value={historyFilter}
+                        onChange={(e) => setHistoryFilter(e.target.value)}
                         placeholder="Filter by number..." 
+                        aria-label="Filter detections by phone number"
                         className="bg-white border border-border px-10 py-2.5 rounded-xl text-sm focus:outline-none focus:border-accent transition-all w-72 shadow-sm"
                       />
-                      <Database className="w-4 h-4 absolute left-3.5 top-3 text-text-tertiary" />
+                      <Database className="w-4 h-4 absolute left-3.5 top-3 text-text-tertiary" aria-hidden="true" />
                     </div>
                   </div>
                 </div>
-
-                <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-bg text-[10px] font-bold text-text-tertiary uppercase tracking-widest">
-                      <tr>
-                        <th className="px-6 py-5">Status</th>
-                        <th className="px-6 py-5">Origin</th>
-                        <th className="px-6 py-5 text-right font-mono">Timestamp</th>
-                        <th className="px-6 py-5">Risk Factor</th>
-                        <th className="px-6 py-5">Call Duration</th>
-                        <th className="px-6 py-5">Verdict</th>
-                        <th className="px-6 py-5 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                       {history.map(item => (
-                         <tr key={item.id} className="hover:bg-bg/40 transition-colors">
-                           <td className="px-6 py-5">
-                             <div className={`w-1.5 h-1.5 rounded-full ${item.riskScore > 70 ? 'bg-danger animate-pulse' : 'bg-accent'}`} />
-                           </td>
-                           <td className="px-6 py-5 font-semibold text-sm text-text-primary">{item.phoneNumber}</td>
-                           <td className="px-6 py-5 text-[11px] text-text-tertiary text-right">{item.timestamp.toLocaleString()}</td>
-                           <td className="px-6 py-5">
-                             <div className="flex items-center gap-3">
-                               <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
-                                 <div className={`h-full ${item.riskScore > 70 ? 'bg-danger' : 'bg-accent'}`} style={{ width: `${item.riskScore}%` }} />
+  
+                  <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-bg text-[10px] font-bold text-text-tertiary uppercase tracking-widest">
+                        <tr>
+                          <th className="px-6 py-5">Status</th>
+                          <th className="px-6 py-5">Origin</th>
+                          <th className="px-6 py-5 text-right font-mono">Timestamp</th>
+                          <th className="px-6 py-5">Risk Factor</th>
+                          <th className="px-6 py-5">Call Duration</th>
+                          <th className="px-6 py-5">Verdict</th>
+                          <th className="px-6 py-5 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                         {filteredHistory.map(item => (
+                           <tr key={item.id} className="hover:bg-bg/40 transition-colors group">
+                             <td className="px-6 py-5">
+                               <div className={`w-1.5 h-1.5 rounded-full ${item.riskScore > 70 ? 'bg-danger animate-pulse' : 'bg-accent'}`} />
+                             </td>
+                             <td className="px-6 py-5 font-semibold text-sm text-text-primary">{item.phoneNumber}</td>
+                             <td className="px-6 py-5 text-[11px] text-text-tertiary text-right">{item.timestamp.toLocaleString()}</td>
+                             <td className="px-6 py-5">
+                               <div className="flex items-center gap-3">
+                                 <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
+                                   <div className={`h-full ${item.riskScore > 70 ? 'bg-danger' : 'bg-accent'}`} style={{ width: `${item.riskScore}%` }} />
+                                 </div>
+                                 <span className="text-[10px] font-bold text-text-secondary">{item.riskScore}%</span>
                                </div>
-                               <span className="text-[10px] font-bold text-text-secondary">{item.riskScore}%</span>
+                             </td>
+                             <td className="px-6 py-5 text-xs text-text-secondary font-medium">{item.duration}</td>
+                             <td className="px-6 py-5">
+                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${getVerdict(item.riskScore).bg} ${getVerdict(item.riskScore).color}`}>
+                                  {getVerdict(item.riskScore).label}
+                                </span>
+                             </td>
+                             <td className="px-6 py-5 text-right">
+                               <div className="flex items-center justify-end gap-2">
+                                 <button 
+                                   onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
+                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
+                                   title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
+                                   aria-label={item.isBlocked ? 'Number is blocked' : 'Block number'}
+                                 >
+                                   <Ban className="w-3.5 h-3.5" aria-hidden="true" />
+                                 </button>
+                                 <button 
+                                   onClick={() => deleteHistoryItem(item.id)}
+                                   className="p-2 hover:bg-danger/10 hover:text-danger rounded-lg transition-all text-text-tertiary opacity-0 group-hover:opacity-100" 
+                                   title="Remove Log Entry"
+                                   aria-label="Remove Log Entry"
+                                 >
+                                   <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                 </button>
+                               </div>
+                             </td>
+                           </tr>
+                         ))}
+                      </tbody>
+                    </table>
+                  </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'settings' && (
+              <motion.div 
+                key="settings"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="max-w-2xl mx-auto space-y-8"
+              >
+                <div className="bg-white border border-border rounded-2xl overflow-hidden shadow-sm">
+                  <div className="p-8 border-b border-border flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-bold tracking-tight text-text-primary">Protection Settings</h3>
+                      <p className="text-sm text-text-tertiary mt-1">Configure automated mitigation protocols and security thresholds.</p>
+                    </div>
+                    
+                    <AnimatePresence>
+                      {saveStatus !== 'idle' && (
+                        <motion.div 
+                          initial={{ opacity: 0, x: 10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent-soft text-accent"
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full ${saveStatus === 'saving' ? 'bg-accent animate-pulse' : 'bg-accent'}`} />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">
+                            {saveStatus === 'saving' ? 'Saving changes...' : 'Changes synchronized'}
+                          </span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  
+                  <div className="p-8 space-y-10">
+                    {/* Auto-Block Section */}
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Ban className="w-4 h-4 text-accent" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Automated Call Termination</label>
+                        </div>
+                        <p className="text-xs text-text-tertiary leading-relaxed">
+                          Automatically disconnect calls and black-list the originating number when individual risk factors exceed the defined threshold.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setAutoBlockEnabled(!autoBlockEnabled)}
+                        className={`w-12 h-6 rounded-full relative transition-all shrink-0 ${autoBlockEnabled ? 'bg-accent shadow-sm' : 'bg-border'}`}
+                      >
+                        <motion.div 
+                          animate={{ x: autoBlockEnabled ? 26 : 2 }}
+                          className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
+                        />
+                      </button>
+                    </div>
+
+                    {/* Threshold Section */}
+                    <AnimatePresence>
+                      {autoBlockEnabled && (
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-8 pt-8 border-t border-border overflow-hidden"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                              <label id="threshold-label" className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">Inference Confidence Threshold</label>
+                              <p className="text-[11px] text-text-tertiary opacity-70">Define the sensitivity of the AASIST-V2 detection gate.</p>
+                            </div>
+                            <div className="flex items-center gap-4">
+                               <div className="flex items-center gap-1 bg-bg border border-border rounded-lg p-1">
+                                  <button 
+                                    onClick={() => setAutoBlockThreshold(prev => Math.max(50, prev - 1))}
+                                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
+                                    disabled={autoBlockThreshold <= 50}
+                                    aria-label="Decrease threshold"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                                  </button>
+                                  <div className="w-12 text-center font-mono font-bold text-sm text-text-primary" aria-live="polite" aria-atomic="true">{autoBlockThreshold}%</div>
+                                  <button 
+                                    onClick={() => setAutoBlockThreshold(prev => Math.min(100, prev + 1))}
+                                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
+                                    disabled={autoBlockThreshold >= 100}
+                                    aria-label="Increase threshold"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                                  </button>
+                               </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="relative pt-2">
+                              {/* Background scale */}
+                              <div className="absolute inset-x-0 h-1 bg-bg rounded-full top-1/2 -translate-y-1/2 flex justify-between px-1">
+                                {[50, 60, 70, 80, 90, 100].map(val => (
+                                  <div key={val} className="w-0.5 h-2 bg-border -mt-0.5" />
+                                ))}
+                              </div>
+                              
+                              <input 
+                                type="range" 
+                                min="50" 
+                                max="100" 
+                                step="1"
+                                value={autoBlockThreshold}
+                                onChange={(e) => setAutoBlockThreshold(parseInt(e.target.value))}
+                                aria-labelledby="threshold-label"
+                                className="relative z-10 w-full h-1.5 bg-transparent appearance-none cursor-pointer accent-accent"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className={`p-3 rounded-xl border transition-all ${autoBlockThreshold < 70 ? 'bg-accent/5 border-accent/20' : 'bg-bg border-transparent opacity-40'}`}>
+                                <div className="text-[9px] font-black uppercase tracking-wider mb-1">Permissive</div>
+                                <div className="text-[10px] text-text-secondary">High sensitivity, more false positives.</div>
+                              </div>
+                              <div className={`p-3 rounded-xl border transition-all ${autoBlockThreshold >= 70 && autoBlockThreshold <= 85 ? 'bg-accent/5 border-accent/20' : 'bg-bg border-transparent opacity-40'}`}>
+                                <div className="text-[9px] font-black uppercase tracking-wider mb-1">Standard</div>
+                                <div className="text-[10px] text-text-secondary">Optimal balance for general usage.</div>
+                              </div>
+                              <div className={`p-3 rounded-xl border transition-all ${autoBlockThreshold > 85 ? 'bg-danger/5 border-danger/20' : 'bg-bg border-transparent opacity-40'}`}>
+                                <div className="text-[9px] font-black uppercase tracking-wider mb-1">Aggressive</div>
+                                <div className="text-[10px] text-text-secondary">Strict rejection, high specificity.</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-bg/50 border border-border p-4 rounded-xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+                             <div className={`w-2 h-2 rounded-full ${autoBlockThreshold > 85 ? 'bg-danger' : 'bg-accent'} animate-pulse`} />
+                             <p className="text-[11px] text-text-secondary font-medium leading-tight">
+                               Current configuration will automatically terminate signals with a <span className="font-bold text-text-primary">{autoBlockThreshold >= 90 ? 'Critical' : 'High'}</span> deepfake probability score.
+                             </p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Audio Processing */}
+                    <div className="pt-10 border-t border-border space-y-8">
+                       <div className="flex items-center gap-2 mb-2">
+                          <Volume2 className="w-4 h-4 text-accent" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Audio Processing</label>
+                       </div>
+
+                       <div className="space-y-4 pb-6 border-b border-border/50">
+                          <div className="flex items-center gap-2">
+                             <Headphones className="w-4 h-4 text-accent" />
+                             <h4 className="text-sm font-semibold text-text-primary">Source Selection</h4>
+                          </div>
+                          <p className="text-[11px] text-text-tertiary max-w-sm">Select the hardware interface to use for real-time capture and neural inference.</p>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                             <button
+                                onClick={() => setSelectedDeviceId('default')}
+                                className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === 'default' ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-white hover:border-accent/40'}`}
+                                aria-label="Select System Default Source"
+                                aria-pressed={selectedDeviceId === 'default'}
+                             >
+                                <div className="flex items-center justify-between mb-1">
+                                   <span className={`text-[10px] font-bold uppercase tracking-wider ${selectedDeviceId === 'default' ? 'text-accent' : 'text-text-tertiary'}`}>System Route</span>
+                                   {selectedDeviceId === 'default' && <div className="w-1.5 h-1.5 rounded-full bg-accent" />}
+                                </div>
+                                <div className="text-xs font-semibold text-text-primary">Default Audio Pipeline</div>
+                             </button>
+
+                             {audioDevices.map(device => (
+                                <button
+                                   key={device.deviceId}
+                                   onClick={() => setSelectedDeviceId(device.deviceId)}
+                                   className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === device.deviceId ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-white hover:border-accent/40'}`}
+                                   aria-label={`Select source: ${device.label || 'Unknown Interface'}`}
+                                   aria-pressed={selectedDeviceId === device.deviceId}
+                                >
+                                   <div className="flex items-center justify-between mb-1">
+                                      <span className={`text-[10px] font-bold uppercase tracking-wider ${selectedDeviceId === device.deviceId ? 'text-accent' : 'text-text-tertiary'}`}>Hardware ID</span>
+                                      {selectedDeviceId === device.deviceId && <div className="w-1.5 h-1.5 rounded-full bg-accent" />}
+                                   </div>
+                                   <div className="text-xs font-semibold text-text-primary truncate" title={device.label || 'Unknown Interface'}>
+                                      {device.label || `Interface ${device.deviceId.slice(0, 8)}...`}
+                                   </div>
+                                </button>
+                             ))}
+                          </div>
+                       </div>
+
+                       <div className="flex items-start justify-between gap-6">
+                          <div className="space-y-1">
+                             <h4 className="text-sm font-semibold text-text-primary">Background Noise Reduction</h4>
+                             <p className="text-[11px] text-text-tertiary max-w-sm">Attempt to filter environmental noise from the live stream to isolate vocal characteristics.</p>
+                          </div>
+                          <button 
+                             onClick={() => setNoiseReductionEnabled(!noiseReductionEnabled)}
+                             className={`w-12 h-6 rounded-full relative transition-all shrink-0 ${noiseReductionEnabled ? 'bg-accent shadow-sm' : 'bg-border'}`}
+                             aria-label="Toggle noise reduction"
+                             aria-pressed={noiseReductionEnabled}
+                          >
+                             <motion.div 
+                                animate={{ 
+                                   x: noiseReductionEnabled ? 26 : 2,
+                                }}
+                                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
+                             />
+                          </button>
+                       </div>
+
+                       <AnimatePresence>
+                          {noiseReductionEnabled && (
+                             <motion.div 
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="space-y-4 pt-4 overflow-hidden"
+                             >
+                                <div className="flex items-center justify-between">
+                                   <div className="space-y-1">
+                                      <label id="nr-intensity-label" className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">NR Intensity</label>
+                                      <p className="text-[11px] text-text-tertiary opacity-70">Control the aggressive filtering of the denoising algorithm.</p>
+                                   </div>
+                                   <div className="flex items-center gap-3">
+                                      <input 
+                                         type="range" min="0" max="1" step="0.1" 
+                                         value={noiseReductionIntensity} 
+                                         onChange={(e) => setNoiseReductionIntensity(parseFloat(e.target.value))}
+                                         className="w-32 h-1.5 bg-bg border border-border rounded-full appearance-none cursor-pointer accent-accent"
+                                         aria-labelledby="nr-intensity-label"
+                                      />
+                                      <span className="text-xs font-mono font-bold text-text-primary w-8 text-right">{Math.round(noiseReductionIntensity * 100)}%</span>
+                                   </div>
+                                </div>
+                                <div className="p-4 bg-accent/5 border border-accent/10 rounded-xl flex items-start gap-4">
+                                   <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
+                                   <p className="text-[11px] text-text-secondary leading-relaxed">
+                                      Higher intensity can reduce noise but may introduce spectral distortion, potentially impacting the <span className="font-bold">AASIST-V2</span> model's phase coherence analysis.
+                                   </p>
+                                </div>
+                             </motion.div>
+                          )}
+                       </AnimatePresence>
+                    </div>
+
+                    {/* Voice Interaction */}
+                    <div className="pt-10 border-t border-border space-y-6">
+                       <div className="flex items-center gap-2 mb-2">
+                          <Mic className="w-4 h-4 text-accent" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Voice Interaction</label>
+                       </div>
+
+                       <div className="flex items-start justify-between gap-6">
+                          <div className="space-y-1">
+                             <h4 className="text-sm font-semibold text-text-primary">Voice-Activated Commands</h4>
+                             <p className="text-[11px] text-text-tertiary max-w-sm">Enable hands-free control of Guardian protocols via neural speech recognition.</p>
+                             <div className="pt-2 flex flex-wrap gap-2">
+                               {['"Start Analysis"', '"Stop Analysis"', '"Frequency Mode"', '"Open Settings"'].map(cmd => (
+                                 <code key={cmd} className="text-[9px] bg-bg border border-border px-1.5 py-0.5 rounded text-text-tertiary font-mono">{cmd}</code>
+                               ))}
                              </div>
-                           </td>
-                           <td className="px-6 py-5 text-xs text-text-secondary font-medium">{item.duration}</td>
-                           <td className="px-6 py-5">
-                              <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${getVerdict(item.riskScore).bg} ${getVerdict(item.riskScore).color}`}>
-                                {getVerdict(item.riskScore).label}
-                              </span>
-                           </td>
-                           <td className="px-6 py-5 text-right">
-                             <div className="flex items-center justify-end gap-2">
-                               <button 
-                                 onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
-                                 className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
-                                 title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
-                               >
-                                 <Ban className="w-3.5 h-3.5" />
-                               </button>
-                               <button className="p-2 hover:bg-bg rounded-lg transition-colors text-text-tertiary">
-                                 <MoreVertical className="w-4 h-4" />
-                               </button>
+                          </div>
+                          <button 
+                             onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
+                             className={`w-12 h-6 rounded-full relative transition-all shrink-0 ${voiceControlEnabled ? 'bg-accent shadow-sm' : 'bg-border'}`}
+                             aria-label="Toggle voice control"
+                             aria-pressed={voiceControlEnabled}
+                          >
+                             <motion.div 
+                                animate={{ 
+                                   x: voiceControlEnabled ? 26 : 2,
+                                }}
+                                className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
+                             />
+                          </button>
+                       </div>
+                    </div>
+
+                    {/* Alerting Preferences */}
+                    <div className="pt-10 border-t border-border space-y-6">
+                       <div className="flex items-center gap-2">
+                          <Bell className="w-4 h-4 text-accent" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">In-Call Alerting</label>
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="p-4 bg-bg border border-border rounded-xl flex items-center justify-between">
+                             <span className="text-xs font-semibold text-text-secondary">Visual Signal Overlay</span>
+                             <div className="w-8 h-4 bg-accent rounded-full relative">
+                                <div className="absolute right-1 top-1 w-2 h-2 bg-white rounded-full" />
                              </div>
-                           </td>
-                         </tr>
-                       ))}
-                    </tbody>
-                  </table>
+                          </div>
+                          <div className="p-4 bg-bg border border-border rounded-xl flex items-center justify-between opacity-50">
+                             <span className="text-xs font-semibold text-text-secondary">Haptic Feedback</span>
+                             <div className="w-8 h-4 bg-border rounded-full relative">
+                                <div className="absolute left-1 top-1 w-2 h-2 bg-white rounded-full" />
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-bg p-6 flex justify-end gap-3 border-t border-border">
+                    <button 
+                      onClick={resetSettings}
+                      className="text-[10px] font-bold text-text-tertiary uppercase hover:text-text-primary transition-colors px-4 py-2 hover:bg-white rounded-lg active:scale-95"
+                    >
+                      Reset Defaults
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1011,6 +1870,8 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9, y: 50 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 50 }}
+              role="alert"
+              aria-live="assertive"
               className="fixed bottom-8 right-8 z-50 w-80"
             >
               <div className="bg-danger/95 backdrop-blur-xl text-white p-6 rounded-3xl shadow-2xl shadow-danger/40 border border-white/20">
@@ -1047,13 +1908,16 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="block-dialog-title"
                 className="bg-white border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
               >
                 <div className="flex flex-col items-center text-center">
                   <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">
-                    <AlertTriangle className="w-8 h-8" />
+                    <AlertTriangle className="w-8 h-8" aria-hidden="true" />
                   </div>
-                  <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Block this sender?</h3>
+                  <h3 id="block-dialog-title" className="text-xl font-bold tracking-tight text-text-primary mb-2">Block this sender?</h3>
                   <p className="text-xs text-text-tertiary leading-relaxed mb-8">
                     Incoming calls from <span className="text-text-primary font-bold">{selectedForBlock.phoneNumber}</span> will be automatically rejected and routed to the quarantine queue.
                   </p>
