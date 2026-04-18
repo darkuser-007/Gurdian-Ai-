@@ -26,6 +26,8 @@ import {
   Database,
   Cpu,
   RefreshCw,
+  GitBranch,
+  Wrench,
   MoreVertical,
   Bell,
   Ban,
@@ -139,6 +141,9 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [blockedNumbers, setBlockedNumbers] = useState<string[]>([]);
+  const [numberToRemove, setNumberToRemove] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [toast, setToast] = useState<{message: string} | null>(null);
   
   const getDevices = async () => {
     try {
@@ -251,10 +256,8 @@ export default function App() {
         isDarkMode,
         blockedNumbers
       }));
-      setSaveStatus('saved');
-      
-      const resetTimer = setTimeout(() => setSaveStatus('idle'), 2000);
-      return () => clearTimeout(resetTimer);
+      setSaveStatus('idle');
+      setToast({ message: 'Settings saved!' });
     }, 800);
 
     return () => clearTimeout(timer);
@@ -268,6 +271,14 @@ export default function App() {
         document.documentElement.classList.remove('dark');
      }
   }, [isDarkMode]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Handle Voice Commands
   useEffect(() => {
@@ -369,9 +380,23 @@ export default function App() {
   };
 
   const toggleBlock = (id: string) => {
-    setHistory(prev => prev.map(item => 
-      item.id === id ? { ...item, isBlocked: !item.isBlocked } : item
+    const item = history.find(i => i.id === id);
+    if (!item) return;
+
+    const phoneNumber = item.phoneNumber;
+    const isNowBlocked = !item.isBlocked;
+
+    setHistory(prev => prev.map(i => 
+      i.id === id ? { ...i, isBlocked: isNowBlocked } : i
     ));
+
+    setBlockedNumbers(prev => {
+      if (isNowBlocked) {
+        return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
+      } else {
+        return prev.filter(n => n !== phoneNumber);
+      }
+    });
     setConfirmBlockId(null);
   };
 
@@ -467,6 +492,12 @@ export default function App() {
         }));
 
         // Automated Mitigation Strategy
+        if (currentCallNumber && blockedNumbers.includes(currentCallNumber)) {
+          setIsCallActive(false);
+          // In a real app, we would add the currentCallNumber to the blocklist here
+          return;
+        }
+
         if (autoBlockEnabled && newScore >= autoBlockThreshold) {
           setIsCallActive(false);
           // In a real app, we would add the currentCallNumber to the blocklist here
@@ -496,7 +527,7 @@ export default function App() {
       clearInterval(interval);
       stopAudioViz();
     };
-  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId]);
+  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId, blockedNumbers]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -846,7 +877,7 @@ export default function App() {
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'workflow' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
             aria-current={activeTab === 'workflow' ? 'page' : undefined}
           >
-            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+            <GitBranch className="w-4 h-4" aria-hidden="true" />
             Workflow
           </button>
           <button 
@@ -862,7 +893,7 @@ export default function App() {
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all group ${activeTab === 'settings' ? 'bg-accent-soft text-accent font-semibold' : 'text-text-secondary hover:text-text-primary hover:bg-bg/50'}`}
             aria-current={activeTab === 'settings' ? 'page' : undefined}
           >
-            <Settings className="w-4 h-4" aria-hidden="true" />
+            <Wrench className="w-4 h-4" aria-hidden="true" />
             Settings
           </button>
         </nav>
@@ -1315,6 +1346,12 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-lg">Detailed Detection History</h3>
                         <button className="text-xs text-accent bg-accent/10 px-3 py-1.5 rounded-lg border border-accent/20 hover:bg-accent/20 transition-all font-bold">Export Logs</button>
+                        <button 
+                           onClick={() => setShowClearConfirm(true)}
+                           className="text-xs text-danger bg-danger/10 px-3 py-1.5 rounded-lg border border-danger/20 hover:bg-danger/20 transition-all font-bold"
+                        >
+                           Clear All
+                        </button>
                       </div>
                       <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border">
                         {history.map((item) => (
@@ -1336,6 +1373,14 @@ export default function App() {
                                 <div className={`text-sm font-bold ${item.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{item.riskScore}%</div>
                               </div>
                               <div className="text-right flex items-center justify-end gap-2 pr-1">
+                                <button 
+                                  onClick={() => deleteHistoryItem(item.id)}
+                                  className="p-2 transition-all rounded-lg border border-transparent hover:bg-danger/10 hover:text-danger text-text-tertiary"
+                                  title="Delete Entry"
+                                  aria-label="Delete history entry"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                                 <button 
                                   onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
@@ -1906,7 +1951,7 @@ export default function App() {
                                 <div key={number} className="flex items-center justify-between p-3 bg-bg border border-border rounded-lg">
                                    <span className="text-sm font-mono text-text-secondary">{number}</span>
                                    <button 
-                                      onClick={() => setBlockedNumbers(blockedNumbers.filter(n => n !== number))}
+                                      onClick={() => setNumberToRemove(number)}
                                       className="p-1.5 hover:bg-danger/10 text-text-tertiary hover:text-danger rounded-md transition-all"
                                    >
                                       <Trash2 className="w-4 h-4" />
@@ -2007,6 +2052,121 @@ export default function App() {
                 </div>
               </motion.div>
             </div>
+          )}
+
+          {numberToRemove && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setNumberToRemove(null)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                className="bg-card border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">
+                    <Trash2 className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Remove Block?</h3>
+                  <p className="text-xs text-text-tertiary leading-relaxed mb-8">
+                    Are you sure you want to remove <span className="text-text-primary font-bold">{numberToRemove}</span> from your blocked list?
+                  </p>
+                  <div className="flex flex-col w-full gap-3">
+                    <button 
+                      onClick={() => {
+                         setBlockedNumbers(blockedNumbers.filter(n => n !== numberToRemove));
+                         setNumberToRemove(null);
+                      }}
+                      className="w-full py-3 bg-danger text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-danger/20 hover:brightness-110 transition-all"
+                    >
+                      Confirm Removal
+                    </button>
+                    <button 
+                      onClick={() => setNumberToRemove(null)}
+                      className="w-full py-3 bg-bg text-text-secondary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-border transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {showClearConfirm && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowClearConfirm(false)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                className="bg-card border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">
+                    <Trash2 className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Clear All Logs?</h3>
+                  <p className="text-xs text-text-tertiary leading-relaxed mb-8">
+                    This action will permanently remove all detection history.
+                  </p>
+                  <div className="flex flex-col w-full gap-3">
+                    <button 
+                      onClick={() => {
+                         setHistory([]);
+                         setShowClearConfirm(false);
+                         setToast({ message: 'All logs cleared' });
+                      }}
+                      className="w-full py-3 bg-danger text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-danger/20 hover:brightness-110 transition-all"
+                    >
+                      Confirm Clear
+                    </button>
+                    <button 
+                      onClick={() => setShowClearConfirm(false)}
+                      className="w-full py-3 bg-bg text-text-secondary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-border transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {toast && (
+            <motion.div 
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="fixed bottom-8 right-8 z-[70] bg-card border border-border shadow-2xl rounded-2xl p-4 flex items-center gap-3"
+            >
+              <div className="flex items-center gap-2 text-accent">
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="text-sm font-medium text-text-primary">{toast.message}</span>
+              </div>
+              <button 
+                onClick={() => setToast(null)}
+                className="ml-2 hover:bg-bg p-1 rounded-full text-text-tertiary"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </motion.div>
           )}
         </AnimatePresence>
       </main>
