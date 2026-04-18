@@ -47,7 +47,11 @@ import {
   SignalLow,
   SignalMedium,
   Headphones,
-  Speaker
+  Speaker,
+  Sun,
+  Moon,
+  MessageSquare,
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ResponsiveContainer, LineChart, Line, YAxis } from 'recharts';
@@ -133,6 +137,7 @@ export default function App() {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('default');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [historyFilter, setHistoryFilter] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(false);
   
   const getDevices = async () => {
     try {
@@ -160,6 +165,12 @@ export default function App() {
         if (parsed.noiseReductionIntensity !== undefined) setNoiseReductionIntensity(parsed.noiseReductionIntensity);
         if (parsed.selectedDeviceId !== undefined) setSelectedDeviceId(parsed.selectedDeviceId);
         if (parsed.voiceControlEnabled !== undefined) setVoiceControlEnabled(parsed.voiceControlEnabled);
+        if (parsed.isDarkMode !== undefined) {
+          setIsDarkMode(parsed.isDarkMode);
+          if (parsed.isDarkMode) {
+            document.documentElement.classList.add('dark');
+          }
+        }
       } catch (e) {
         console.error("Failed to parse settings", e);
       }
@@ -226,30 +237,34 @@ export default function App() {
 
   // Handle Auto-Save for Settings
   useEffect(() => {
-    // Skip initial load
-    const isInitialLoad = !autoBlockEnabled && autoBlockThreshold === 85 && !noiseReductionEnabled && noiseReductionIntensity === 0.5 && selectedDeviceId === 'default';
-    if (isInitialLoad) return;
-
     setSaveStatus('saving');
     const timer = setTimeout(() => {
-      // Simulate persistence (e.g., localStorage)
       localStorage.setItem('guardian_settings', JSON.stringify({
         autoBlockEnabled,
         autoBlockThreshold,
         noiseReductionEnabled,
         noiseReductionIntensity,
         selectedDeviceId,
-        voiceControlEnabled
+        voiceControlEnabled,
+        isDarkMode
       }));
       setSaveStatus('saved');
       
-      // Reset status after a delay
       const resetTimer = setTimeout(() => setSaveStatus('idle'), 2000);
       return () => clearTimeout(resetTimer);
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled]);
+  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled, isDarkMode]);
+
+  // Handle Dark mode toggle class
+  useEffect(() => {
+     if (isDarkMode) {
+        document.documentElement.classList.add('dark');
+     } else {
+        document.documentElement.classList.remove('dark');
+     }
+  }, [isDarkMode]);
 
   // Handle Voice Commands
   useEffect(() => {
@@ -808,7 +823,7 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col sm:flex-row">
       {/* --- Sidebar --- */}
-      <aside className="w-full sm:w-64 border-b sm:border-b-0 sm:border-r border-border p-8 flex flex-col gap-10 bg-white z-20">
+      <aside className="w-full sm:w-64 border-b sm:border-b-0 sm:border-r border-border p-8 flex flex-col gap-10 bg-card z-20">
         <div className="flex items-center gap-3">
           <div className="w-4 h-4 rounded bg-accent" />
           <h1 className="font-bold text-lg leading-tight tracking-tight text-text-primary uppercase italic">Guardian</h1>
@@ -850,16 +865,25 @@ export default function App() {
         </nav>
 
         <div className="mt-auto pt-6 border-t border-border">
-          <div className="flex items-center gap-3 px-3 py-2 bg-bg rounded-lg border border-border">
-            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-            <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">Live Protection</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 px-3 py-2 bg-bg rounded-lg border border-border">
+              <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">Live</span>
+            </div>
+            <button 
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 rounded-lg text-text-secondary hover:bg-bg border border-transparent hover:border-border transition-colors"
+              aria-label={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+               {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
           </div>
         </div>
       </aside>
 
       {/* --- Main Content --- */}
       <main className="flex-1 flex flex-col relative overflow-hidden bg-bg pixel-grid">
-        <header className="h-20 border-b border-border flex items-center justify-between px-10 bg-white relative z-10">
+        <header className="h-20 border-b border-border flex items-center justify-between px-10 bg-card relative z-10">
           <div className="flex items-center gap-4">
             <div>
               <div className="text-[10px] text-text-tertiary uppercase tracking-widest font-bold mb-0.5">Guardian AI / Pro</div>
@@ -1009,7 +1033,7 @@ export default function App() {
                                 <div className="flex bg-bg border border-border rounded-lg p-0.5">
                                   <button
                                     onClick={() => setVizMode('frequency')}
-                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'frequency' ? 'bg-white shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'frequency' ? 'bg-card shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
                                     aria-label="Frequency Spectrum Mode"
                                     title="Frequency Spectrum View"
                                   >
@@ -1017,7 +1041,7 @@ export default function App() {
                                   </button>
                                   <button
                                     onClick={() => setVizMode('waveform')}
-                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'waveform' ? 'bg-white shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+                                    className={`p-1.5 rounded-md transition-all ${vizMode === 'waveform' ? 'bg-card shadow-sm text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
                                     aria-label="Waveform Mode"
                                     title="Waveform View"
                                   >
@@ -1163,7 +1187,7 @@ export default function App() {
                                    </div>
                                  )}
                                  <div className="flex flex-col items-center mb-8">
-                                   <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${verdict.color} border-current bg-white shadow-sm`}>
+                                   <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${verdict.color} border-current bg-card shadow-sm`}>
                                      <verdict.icon className="w-6 h-6" />
                                    </div>
                                    <h4 className={`text-3xl font-black tracking-tighter ${verdict.color}`}>{verdict.label}</h4>
@@ -1245,7 +1269,7 @@ export default function App() {
 
                       {uploadedFile ? (
                         <div className="bg-bg/40 border border-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-6">
-                          <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center border border-border shadow-sm">
+                          <div className="w-16 h-16 rounded-2xl bg-card flex items-center justify-center border border-border shadow-sm">
                             <FileAudio className="w-8 h-8 text-accent opacity-60" />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -1291,7 +1315,7 @@ export default function App() {
                       </div>
                       <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border">
                         {history.map((item) => (
-                          <div key={item.id} className="p-4 flex items-center gap-6 hover:bg-white/[0.02] transition-colors cursor-default group">
+                          <div key={item.id} className="p-4 flex items-center gap-6 hover:bg-card transition-colors cursor-default group">
                             <div className={`p-3 rounded-xl border ${getVerdict(item.riskScore).bg}`}>
                               {item.riskScore > 75 ? <XCircle className="w-5 h-5 text-danger" /> : <CheckCircle2 className="w-5 h-5 text-accent" />}
                             </div>
@@ -1336,7 +1360,7 @@ export default function App() {
                        </div>
                        <div className="space-y-4 relative">
                          {workflowSteps.map((step) => (
-                           <div key={step.id} className={`bg-white border border-border p-4 rounded-xl flex items-start gap-4 transition-all duration-300 shadow-sm ${step.status === 'idle' ? 'opacity-40' : 'opacity-100'}`}>
+                           <div key={step.id} className={`bg-card border border-border p-4 rounded-xl flex items-start gap-4 transition-all duration-300 shadow-sm ${step.status === 'idle' ? 'opacity-40' : 'opacity-100'}`}>
                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 ${
                                step.status === 'active' ? 'bg-accent text-white shadow-lg shadow-accent/20' : 
                                step.status === 'completed' ? 'bg-accent-soft text-accent' :
@@ -1432,7 +1456,7 @@ export default function App() {
                           icon: <ShieldAlert className="w-6 h-6" />
                         }
                       ].map((node, i) => (
-                        <div key={i} className="flex flex-col md:flex-row gap-8 items-center bg-white border border-border p-8 rounded-2xl relative overflow-hidden group hover:border-accent/40 transition-all shadow-sm">
+                        <div key={i} className="flex flex-col md:flex-row gap-8 items-center bg-card border border-border p-8 rounded-2xl relative overflow-hidden group hover:border-accent/40 transition-all shadow-sm">
                            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
                               {React.cloneElement(node.icon as any, { size: 120 })}
                            </div>
@@ -1481,14 +1505,14 @@ export default function App() {
                         onChange={(e) => setHistoryFilter(e.target.value)}
                         placeholder="Filter by number..." 
                         aria-label="Filter detections by phone number"
-                        className="bg-white border border-border px-10 py-2.5 rounded-xl text-sm focus:outline-none focus:border-accent transition-all w-72 shadow-sm"
+                        className="bg-card border border-border px-10 py-2.5 rounded-xl text-sm focus:outline-none focus:border-accent transition-all w-72 shadow-sm text-text-primary"
                       />
                       <Database className="w-4 h-4 absolute left-3.5 top-3 text-text-tertiary" aria-hidden="true" />
                     </div>
                   </div>
                 </div>
   
-                  <div className="bg-white border border-border rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
                     <table className="w-full text-left border-collapse">
                       <thead className="bg-bg text-[10px] font-bold text-text-tertiary uppercase tracking-widest">
                         <tr>
@@ -1559,7 +1583,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="max-w-2xl mx-auto space-y-8"
               >
-                <div className="bg-white border border-border rounded-2xl overflow-hidden shadow-sm">
+                <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
                   <div className="p-8 border-b border-border flex items-center justify-between">
                     <div>
                       <h3 className="text-xl font-bold tracking-tight text-text-primary">Protection Settings</h3>
@@ -1624,7 +1648,7 @@ export default function App() {
                                <div className="flex items-center gap-1 bg-bg border border-border rounded-lg p-1">
                                   <button 
                                     onClick={() => setAutoBlockThreshold(prev => Math.max(50, prev - 1))}
-                                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
+                                    className="p-1.5 hover:bg-card hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
                                     disabled={autoBlockThreshold <= 50}
                                     aria-label="Decrease threshold"
                                   >
@@ -1633,7 +1657,7 @@ export default function App() {
                                   <div className="w-12 text-center font-mono font-bold text-sm text-text-primary" aria-live="polite" aria-atomic="true">{autoBlockThreshold}%</div>
                                   <button 
                                     onClick={() => setAutoBlockThreshold(prev => Math.min(100, prev + 1))}
-                                    className="p-1.5 hover:bg-white hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
+                                    className="p-1.5 hover:bg-card hover:shadow-sm rounded-md transition-all text-text-secondary disabled:opacity-30"
                                     disabled={autoBlockThreshold >= 100}
                                     aria-label="Increase threshold"
                                   >
@@ -1707,7 +1731,7 @@ export default function App() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                              <button
                                 onClick={() => setSelectedDeviceId('default')}
-                                className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === 'default' ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-white hover:border-accent/40'}`}
+                                className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === 'default' ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-card hover:border-accent/40'}`}
                                 aria-label="Select System Default Source"
                                 aria-pressed={selectedDeviceId === 'default'}
                              >
@@ -1722,7 +1746,7 @@ export default function App() {
                                 <button
                                    key={device.deviceId}
                                    onClick={() => setSelectedDeviceId(device.deviceId)}
-                                   className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === device.deviceId ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-white hover:border-accent/40'}`}
+                                   className={`p-4 rounded-xl border text-left transition-all ${selectedDeviceId === device.deviceId ? 'border-accent bg-accent/5 ring-1 ring-accent' : 'border-border bg-card hover:border-accent/40'}`}
                                    aria-label={`Select source: ${device.label || 'Unknown Interface'}`}
                                    aria-pressed={selectedDeviceId === device.deviceId}
                                 >
@@ -1852,7 +1876,7 @@ export default function App() {
                   <div className="bg-bg p-6 flex justify-end gap-3 border-t border-border">
                     <button 
                       onClick={resetSettings}
-                      className="text-[10px] font-bold text-text-tertiary uppercase hover:text-text-primary transition-colors px-4 py-2 hover:bg-white rounded-lg active:scale-95"
+                      className="text-[10px] font-bold text-text-tertiary uppercase hover:text-text-primary transition-colors px-4 py-2 hover:bg-card rounded-lg active:scale-95"
                     >
                       Reset Defaults
                     </button>
@@ -1876,7 +1900,7 @@ export default function App() {
             >
               <div className="bg-danger/95 backdrop-blur-xl text-white p-6 rounded-3xl shadow-2xl shadow-danger/40 border border-white/20">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-2xl bg-white text-danger flex items-center justify-center animate-bounce">
+                  <div className="w-10 h-10 rounded-2xl bg-card text-danger flex items-center justify-center animate-bounce border border-border">
                     <ShieldAlert className="w-6 h-6" />
                   </div>
                   <div>
@@ -1888,7 +1912,7 @@ export default function App() {
                   Pattern mismatch detected in current audio stream. Synthetic vocal artifacts identified. 
                 </p>
                 <div className="flex gap-3">
-                  <button onClick={() => setIsCallActive(false)} className="flex-1 bg-white text-danger py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-white/90 transition-all">Disconnect</button>
+                  <button onClick={() => setIsCallActive(false)} className="flex-1 bg-card border border-border text-danger py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-bg transition-all">Disconnect</button>
                   <button className="px-4 py-2.5 bg-black/20 rounded-xl text-xs font-bold uppercase tracking-wider border border-white/10 hover:bg-black/30 transition-all">Report</button>
                 </div>
               </div>
@@ -1911,7 +1935,7 @@ export default function App() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="block-dialog-title"
-                className="bg-white border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
+                className="bg-card border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
               >
                 <div className="flex flex-col items-center text-center">
                   <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">

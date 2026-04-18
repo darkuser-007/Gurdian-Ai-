@@ -5,27 +5,57 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-bg: #F8F9FA;
-  --color-card: #FFFFFF;
-  --color-border: #E9ECEF;
-  --color-accent: #2563EB;
-  --color-accent-soft: #EFF6FF;
-  --color-danger: #DC2626;
-  --color-warning: #B45309;
-  --color-text-primary: #111827;
-  --color-text-secondary: #4B5563;
-  --color-text-tertiary: #6B7280;
-  --color-column: #F1F3F5;
+  --color-bg: var(--theme-bg);
+  --color-card: var(--theme-card);
+  --color-border: var(--theme-border);
+  --color-accent: var(--theme-accent);
+  --color-accent-soft: var(--theme-accent-soft);
+  --color-danger: var(--theme-danger);
+  --color-warning: var(--theme-warning);
+  --color-text-primary: var(--theme-text-primary);
+  --color-text-secondary: var(--theme-text-secondary);
+  --color-text-tertiary: var(--theme-text-tertiary);
+  --color-column: var(--theme-column);
 }
 
 @layer base {
+  :root {
+    --theme-bg: #F8F9FA;
+    --theme-card: #FFFFFF;
+    --theme-border: #E9ECEF;
+    --theme-accent: #2563EB;
+    --theme-accent-soft: #EFF6FF;
+    --theme-danger: #DC2626;
+    --theme-warning: #B45309;
+    --theme-text-primary: #111827;
+    --theme-text-secondary: #4B5563;
+    --theme-text-tertiary: #6B7280;
+    --theme-column: #F1F3F5;
+    --grid-color: #DEE2E6;
+  }
+  
+  .dark {
+    --theme-bg: #09090B;
+    --theme-card: #141416;
+    --theme-border: #27272A;
+    --theme-accent: #3B82F6;
+    --theme-accent-soft: rgba(59, 130, 246, 0.1);
+    --theme-danger: #EF4444;
+    --theme-warning: #F59E0B;
+    --theme-text-primary: #FAFAFA;
+    --theme-text-secondary: #A1A1AA;
+    --theme-text-tertiary: #71717A;
+    --theme-column: #0E0E10;
+    --grid-color: #27272A;
+  }
+
   body {
-    @apply bg-bg text-text-primary font-sans antialiased selection:bg-accent selection:text-bg;
+    @apply bg-bg text-text-primary font-sans antialiased selection:bg-accent selection:text-white transition-colors duration-200;
   }
 }
 
 .pixel-grid {
-  background-image: radial-gradient(#DEE2E6 1px, transparent 1px);
+  background-image: radial-gradient(var(--grid-color) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
