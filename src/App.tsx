@@ -74,6 +74,8 @@ const SignalBadge = ({ label }: { label: string }) => (
 
 export default function App() {
   const [isCallActive, setIsCallActive] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [isSimulatedMode, setIsSimulatedMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'workflow' | 'history'>('dashboard');
   const [riskScore, setRiskScore] = useState(0);
   const [history, setHistory] = useState<DetectionResult[]>([
@@ -149,7 +151,9 @@ export default function App() {
   }, [isCallActive]);
 
   const startAudioViz = async () => {
+    setPermissionError(null);
     try {
+      // Check if we can get user media
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       const source = audioContextRef.current.createMediaStreamSource(stream);
@@ -178,9 +182,9 @@ export default function App() {
           barHeight = (dataArray[i] / 255) * height;
           
           // Color based on risk
-          let color = '#00FF9C';
-          if (riskScore > 75) color = '#FF4444';
-          else if (riskScore > 40) color = '#FFB800';
+          let color = '#3B82F6'; 
+          if (riskScore > 75) color = '#EF4444';
+          else if (riskScore > 40) color = '#F59E0B';
 
           ctx.fillStyle = color;
           ctx.fillRect(x, height - barHeight, barWidth, barHeight);
@@ -191,14 +195,61 @@ export default function App() {
       };
 
       draw();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Microphone access denied or error:", err);
+      // Fallback to SIMULATED signal if real mic fails, so the user can still see the visualizer
+      setIsSimulatedMode(true);
+      startSimulatedViz();
+      
+      const isDenied = err.name === 'NotAllowedError' || err.message?.toLowerCase().includes('denied');
+      if (isDenied) {
+        setPermissionError('Microphone Access Denied. Running in Simulated Mode.');
+      }
     }
   };
 
+  const startSimulatedViz = () => {
+    const draw = () => {
+      if (!canvasRef.current) return;
+      const ctx = canvasRef.current.getContext('2d')!;
+      const width = canvasRef.current.width;
+      const height = canvasRef.current.height;
+
+      ctx.clearRect(0, 0, width, height);
+      
+      const bars = 64;
+      const barWidth = (width / bars) * 2.5;
+      let x = 0;
+
+      for (let i = 0; i < bars; i++) {
+        // Random motion that looks like speech patterns
+        const barHeight = (Math.sin(Date.now() / 100 + i) * 10 + Math.random() * 20 + 20) * (height / 100);
+        
+        let color = '#3B82F6';
+        if (riskScore > 75) color = '#EF4444';
+        else if (riskScore > 40) color = '#F59E0B';
+
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.4;
+        ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+        x += barWidth + 1;
+      }
+
+      animationFrameRef.current = requestAnimationFrame(draw);
+    };
+    draw();
+  };
+
   const stopAudioViz = () => {
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    if (audioContextRef.current) audioContextRef.current.close();
+    setIsSimulatedMode(false);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(console.error);
+      audioContextRef.current = null;
+    }
   };
 
   const getVerdict = (score: number) => {
@@ -324,7 +375,39 @@ export default function App() {
                           </div>
 
                           <div className={`p-8 rounded-xl border transition-all duration-300 min-h-[240px] flex flex-col items-center justify-center ${isCallActive ? verdict.bg : 'bg-column/50 border-dashed border-border'}`}>
-                             {!isCallActive ? (
+                             {permissionError && !isCallActive ? (
+                               <div className="text-center px-4 max-w-sm">
+                                 <div className="w-12 h-12 rounded-full bg-danger/10 flex items-center justify-center mx-auto mb-4">
+                                   <ShieldAlert className="w-6 h-6 text-danger" />
+                                 </div>
+                                 <p className="text-sm font-bold text-text-primary mb-2">Access Issue Detected</p>
+                                 <p className="text-[11px] text-text-secondary leading-relaxed mb-6">
+                                   Guardian requires microphone access for real-time analysis. Click the <span className="font-bold">lock icon</span> in your address bar to enable permissions.
+                                   {!window.isSecureContext && <span className="block mt-2 text-danger font-bold">Error: Non-secure context detected.</span>}
+                                 </p>
+                                 <div className="flex flex-col gap-2">
+                                   <button 
+                                     onClick={() => {
+                                       setPermissionError(null);
+                                       setIsCallActive(true);
+                                     }}
+                                     className="w-full py-2.5 bg-accent text-white rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm hover:brightness-110"
+                                   >
+                                     Grant & Start
+                                   </button>
+                                   <button 
+                                     onClick={() => {
+                                       setPermissionError(null);
+                                       setIsCallActive(true);
+                                       setIsSimulatedMode(true);
+                                     }}
+                                     className="w-full py-2 text-text-tertiary hover:text-text-secondary text-[10px] font-bold uppercase tracking-wider"
+                                   >
+                                     Use Simulated Signal
+                                   </button>
+                                 </div>
+                               </div>
+                             ) : !isCallActive ? (
                                <div className="text-center">
                                  <Activity className="w-8 h-8 text-text-tertiary mx-auto mb-3 opacity-30" />
                                  <p className="text-sm font-medium text-text-secondary">Ready for incoming stream</p>
@@ -332,6 +415,11 @@ export default function App() {
                                </div>
                              ) : (
                                <div className="w-full h-full flex flex-col items-center">
+                                 {isSimulatedMode && (
+                                   <div className="absolute top-4 right-4 bg-warning/10 text-warning text-[8px] font-bold uppercase px-2 py-1 rounded border border-warning/20">
+                                     Simulated Signal
+                                   </div>
+                                 )}
                                  <div className="flex flex-col items-center mb-8">
                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${verdict.color} border-current bg-white shadow-sm`}>
                                      <verdict.icon className="w-6 h-6" />
