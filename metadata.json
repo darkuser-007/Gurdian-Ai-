@@ -1,0 +1,6 @@
+{
+  "name": "Guardian AI: Deepfake Voice Shield",
+  "description": "Real-time AI-powered protection against voice deepfakes and fraudulent calls. Monitors audio streams to detect synthetic patterns and alerts users of potential risks.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
