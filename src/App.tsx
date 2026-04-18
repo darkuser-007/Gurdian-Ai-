@@ -28,7 +28,16 @@ import {
   RefreshCw,
   MoreVertical,
   Bell,
-  Ban
+  Ban,
+  Volume2,
+  VolumeX,
+  Plus,
+  Minus,
+  Upload,
+  Play,
+  Pause,
+  FileAudio,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -80,6 +89,11 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [isSimulatedMode, setIsSimulatedMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'workflow' | 'history'>('dashboard');
+  const [volume, setVolume] = useState(0.8);
+  const [isMuted, setIsMuted] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isPlayingFile, setIsPlayingFile] = useState(false);
+  const fileAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const [dashboardStats, setDashboardStats] = useState({
     callsMonitored: 0,
     syntheticDetected: 0,
@@ -218,6 +232,62 @@ export default function App() {
     };
   }, [isCallActive]);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('audio/')) {
+      setUploadedFile(file);
+      setIsCallActive(false); // Stop live mode if file is uploaded
+    }
+  };
+
+  const playUploadedFile = async () => {
+    if (!uploadedFile) return;
+    
+    if (isPlayingFile) {
+      stopFilePlayback();
+      return;
+    }
+
+    try {
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
+
+      fileAudioSourceRef.current = audioContextRef.current.createBufferSource();
+      fileAudioSourceRef.current.buffer = audioBuffer;
+      
+      fileAudioSourceRef.current.connect(analyserRef.current);
+      analyserRef.current.connect(audioContextRef.current.destination);
+
+      fileAudioSourceRef.current.onended = () => {
+        setIsPlayingFile(false);
+        setIsCallActive(false);
+      };
+
+      fileAudioSourceRef.current.start(0);
+      setIsPlayingFile(true);
+      setIsCallActive(true); // Trigger visualization
+      
+    } catch (err) {
+      console.error("Playback error:", err);
+    }
+  };
+
+  const stopFilePlayback = () => {
+    if (fileAudioSourceRef.current) {
+      fileAudioSourceRef.current.stop();
+      fileAudioSourceRef.current = null;
+    }
+    setIsPlayingFile(false);
+    setIsCallActive(false);
+  };
+
   const startAudioViz = async () => {
     setPermissionError(null);
     try {
@@ -242,12 +312,13 @@ export default function App() {
 
         ctx.clearRect(0, 0, width, height);
         
+        const effectiveVolume = isMuted ? 0 : volume;
         const barWidth = (width / bufferLength) * 2.5;
         let barHeight;
         let x = 0;
 
         for (let i = 0; i < bufferLength; i++) {
-          barHeight = (dataArray[i] / 255) * height;
+          barHeight = (dataArray[i] / 255) * height * effectiveVolume;
           
           // Color based on risk
           let color = '#3B82F6'; 
@@ -285,13 +356,14 @@ export default function App() {
 
       ctx.clearRect(0, 0, width, height);
       
+      const effectiveVolume = isMuted ? 0 : volume;
       const bars = 64;
       const barWidth = (width / bars) * 2.5;
       let x = 0;
 
       for (let i = 0; i < bars; i++) {
         // Random motion that looks like speech patterns
-        const barHeight = (Math.sin(Date.now() / 100 + i) * 10 + Math.random() * 20 + 20) * (height / 100);
+        const barHeight = (Math.sin(Date.now() / 100 + i) * 10 + Math.random() * 20 + 20) * (height / 100) * effectiveVolume;
         
         let color = '#3B82F6';
         if (riskScore > 75) color = '#EF4444';
@@ -310,13 +382,15 @@ export default function App() {
 
   const stopAudioViz = () => {
     setIsSimulatedMode(false);
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(console.error);
-      audioContextRef.current = null;
+    if (!isPlayingFile) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(console.error);
+        audioContextRef.current = null;
+      }
     }
   };
 
@@ -433,21 +507,66 @@ export default function App() {
                               Live Signal Processing
                               {isCallActive && <span className="ml-2 inline-flex h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
                             </h3>
-                            {isCallActive ? (
-                              <button 
-                                onClick={() => setIsCallActive(false)}
-                                className="bg-danger/10 text-danger px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-danger/10"
-                              >
-                                <PhoneOff className="w-3.5 h-3.5 inline mr-2" /> Stop Agent
-                              </button>
-                            ) : (
-                              <button 
-                                onClick={() => setIsCallActive(true)}
-                                className="bg-accent text-white px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
-                              >
-                                <Phone className="w-3.5 h-3.5 inline mr-2" /> Start Analysis
-                              </button>
-                            )}
+                            <div className="flex items-center gap-3">
+                              {isCallActive && (
+                                <div className="flex items-center gap-1.5 bg-bg/50 border border-border rounded-lg p-1.5 shadow-inner">
+                                  <button 
+                                    onClick={() => setVolume(v => Math.max(0, v - 0.1))}
+                                    className="p-1 hover:bg-bg rounded transition-colors text-text-tertiary"
+                                    title="Decrease Volume"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <div className="w-16 h-1 bg-border rounded-full overflow-hidden mx-1">
+                                    <motion.div 
+                                      className="h-full bg-accent" 
+                                      animate={{ width: `${isMuted ? 0 : volume * 100}%` }}
+                                    />
+                                  </div>
+                                  <button 
+                                    onClick={() => setVolume(v => Math.min(1, v + 0.1))}
+                                    className="p-1 hover:bg-bg rounded transition-colors text-text-tertiary"
+                                    title="Increase Volume"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <div className="w-[1px] h-3 bg-border mx-1" />
+                                  <button 
+                                    onClick={() => setIsMuted(!isMuted)}
+                                    className={`p-1 rounded transition-colors ${isMuted ? 'text-danger bg-danger/10' : 'text-text-tertiary hover:bg-bg'}`}
+                                    title={isMuted ? 'Unmute' : 'Mute'}
+                                  >
+                                    {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                                  </button>
+                                </div>
+                              )}
+                              {isCallActive ? (
+                                <button 
+                                  onClick={() => {
+                                    setIsCallActive(false);
+                                    if (isPlayingFile) stopFilePlayback();
+                                  }}
+                                  className="bg-danger/10 text-danger px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-danger/10"
+                                >
+                                  <PhoneOff className="w-3.5 h-3.5 inline mr-2" /> 
+                                  {isPlayingFile ? 'Stop Analysis' : 'Stop Agent'}
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => {
+                                    if (uploadedFile) {
+                                      playUploadedFile();
+                                    } else {
+                                      setIsCallActive(true);
+                                    }
+                                  }}
+                                  className="bg-accent text-white px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
+                                >
+                                  {uploadedFile ? <Play className="w-3.5 h-3.5 inline mr-2" /> : <Phone className="w-3.5 h-3.5 inline mr-2" />}
+                                  {uploadedFile ? 'Run Audit' : 'Start Analysis'}
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <div className={`p-8 rounded-xl border transition-all duration-300 min-h-[240px] flex flex-col items-center justify-center ${isCallActive ? verdict.bg : 'bg-column/50 border-dashed border-border'}`}>
@@ -540,18 +659,81 @@ export default function App() {
                              )}
                           </div>
                           
-                          <div className="mt-auto space-y-4 px-1 pb-1">
-                             <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
-                               <span className="text-text-tertiary">Model</span>
-                               <span className="text-text-primary">AASIST v4</span>
-                             </div>
-                             <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
-                               <span className="text-text-tertiary">Node</span>
-                               <span className="text-accent">Active</span>
-                             </div>
+                          <div className="mt-auto pt-6 border-t border-border space-y-4 px-1 pb-2">
+                            <h5 className="text-[10px] font-bold text-text-tertiary uppercase tracking-[0.2em]">Neural Architecture</h5>
+                            <div className="space-y-2.5">
+                              <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
+                                <span className="text-text-tertiary">Model Engine</span>
+                                <span className="text-text-primary">AASIST v4.2.0</span>
+                              </div>
+                              <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
+                                <span className="text-text-tertiary">Last Trained</span>
+                                <span className="text-text-primary">OCT 14, 2025</span>
+                              </div>
+                              <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
+                                <span className="text-text-tertiary">Optimization</span>
+                                <span className="text-accent">GPU / FP16</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Sample Upload Section */}
+                    <div className="bg-card border border-border rounded-2xl p-8 shadow-sm">
+                      <div className="flex items-center justify-between mb-8">
+                        <div>
+                          <h3 className="text-lg font-bold tracking-tight text-text-primary">Test Lab Bench</h3>
+                          <p className="text-xs text-text-tertiary mt-1">Upload recorded samples to stress-test detection accuracy.</p>
+                        </div>
+                        <label className="cursor-pointer group">
+                          <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} />
+                          <div className="flex items-center gap-2 bg-accent/5 text-accent border border-accent/20 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest group-hover:bg-accent group-hover:text-white transition-all">
+                            <Upload className="w-3.5 h-3.5" />
+                            Select Sample
+                          </div>
+                        </label>
+                      </div>
+
+                      {uploadedFile ? (
+                        <div className="bg-bg/40 border border-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-6">
+                          <div className="w-16 h-16 rounded-2xl bg-white flex items-center justify-center border border-border shadow-sm">
+                            <FileAudio className="w-8 h-8 text-accent opacity-60" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-bold text-text-primary truncate">{uploadedFile.name}</h4>
+                            <p className="text-[10px] text-text-tertiary font-mono uppercase mt-1">
+                              {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB • READY FOR INFERENCE
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button 
+                              onClick={playUploadedFile}
+                              className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${isPlayingFile ? 'bg-danger text-white shadow-lg shadow-danger/20' : 'bg-accent text-white shadow-lg shadow-accent/20 hover:brightness-110'}`}
+                            >
+                              {isPlayingFile ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                              {isPlayingFile ? 'Stop Analysis' : 'Run Deepfake Audit'}
+                            </button>
+                            <button 
+                              onClick={() => { setUploadedFile(null); stopFilePlayback(); }}
+                              className="p-3 text-text-tertiary hover:bg-danger/10 hover:text-danger rounded-xl transition-colors border border-transparent hover:border-danger/20"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center justify-center gap-4 text-center group hover:border-accent/40 transition-all cursor-pointer" onClick={() => (document.querySelector('input[type="file"]') as HTMLElement)?.click()}>
+                          <div className="w-14 h-14 rounded-full bg-bg flex items-center justify-center text-text-tertiary group-hover:scale-110 transition-transform">
+                             <Upload className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-text-secondary uppercase tracking-widest">Drop audio sample here</p>
+                            <p className="text-[10px] text-text-tertiary mt-2">Supports WAV, MP3, and OGG formats</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Recent Events */}
