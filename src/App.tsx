@@ -93,6 +93,7 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
+  const [confirmBlockId, setConfirmBlockId] = useState<string | null>(null);
   const fileAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const [dashboardStats, setDashboardStats] = useState({
     callsMonitored: 0,
@@ -173,7 +174,22 @@ export default function App() {
     setHistory(prev => prev.map(item => 
       item.id === id ? { ...item, isBlocked: !item.isBlocked } : item
     ));
+    setConfirmBlockId(null);
   };
+
+  const handleBlockClick = (id: string, currentlyBlocked: boolean) => {
+    if (currentlyBlocked) {
+      // Unblocking doesn't necessarily need confirmation in this UI, but we can toggle it
+      toggleBlock(id);
+    } else {
+      setConfirmBlockId(id);
+    }
+  };
+
+  const selectedForBlock = useMemo(() => 
+    history.find(item => item.id === confirmBlockId),
+    [confirmBlockId, history]
+  );
 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([
     { id: '1', title: 'Phone State Observer', description: 'Monitoring OFFHOOK signal', status: 'idle', icon: <Phone /> },
@@ -763,7 +779,7 @@ export default function App() {
                               </div>
                               <div className="text-right flex items-center justify-end gap-2 pr-1">
                                 <button 
-                                  onClick={() => toggleBlock(item.id)}
+                                  onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
                                   title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
                                 >
@@ -967,7 +983,7 @@ export default function App() {
                            <td className="px-6 py-5 text-right">
                              <div className="flex items-center justify-end gap-2">
                                <button 
-                                 onClick={() => toggleBlock(item.id)}
+                                 onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                  className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
                                  title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
                                >
@@ -1016,6 +1032,48 @@ export default function App() {
                 </div>
               </div>
             </motion.div>
+          )}
+
+          {confirmBlockId && selectedForBlock && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setConfirmBlockId(null)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="bg-white border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">
+                    <AlertTriangle className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Block this sender?</h3>
+                  <p className="text-xs text-text-tertiary leading-relaxed mb-8">
+                    Incoming calls from <span className="text-text-primary font-bold">{selectedForBlock.phoneNumber}</span> will be automatically rejected and routed to the quarantine queue.
+                  </p>
+                  <div className="flex flex-col w-full gap-3">
+                    <button 
+                      onClick={() => toggleBlock(confirmBlockId)}
+                      className="w-full py-3 bg-danger text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-danger/20 hover:brightness-110 transition-all"
+                    >
+                      Confirm Block
+                    </button>
+                    <button 
+                      onClick={() => setConfirmBlockId(null)}
+                      className="w-full py-3 bg-bg text-text-secondary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-border transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </main>
