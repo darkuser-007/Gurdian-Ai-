@@ -27,7 +27,8 @@ import {
   Cpu,
   RefreshCw,
   MoreVertical,
-  Bell
+  Bell,
+  Ban
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -41,6 +42,7 @@ interface DetectionResult {
   verdict: 'authentic' | 'suspicious' | 'deepfake';
   duration: string;
   signals: string[];
+  isBlocked?: boolean;
 }
 
 interface WorkflowStep {
@@ -75,8 +77,15 @@ const SignalBadge = ({ label }: { label: string }) => (
 export default function App() {
   const [isCallActive, setIsCallActive] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [isSimulatedMode, setIsSimulatedMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'workflow' | 'history'>('dashboard');
+  const [dashboardStats, setDashboardStats] = useState({
+    callsMonitored: 0,
+    syntheticDetected: 0,
+    accuracyRate: 0,
+    meanLatency: 0
+  });
   const [riskScore, setRiskScore] = useState(0);
   const [history, setHistory] = useState<DetectionResult[]>([
     {
@@ -86,7 +95,8 @@ export default function App() {
       riskScore: 12,
       verdict: 'authentic',
       duration: '4:20',
-      signals: ['consistent-prosody', 'natural-noise', 'low-latency']
+      signals: ['consistent-prosody', 'natural-noise', 'low-latency'],
+      isBlocked: false
     },
     {
       id: '2',
@@ -95,9 +105,61 @@ export default function App() {
       riskScore: 88,
       verdict: 'deepfake',
       duration: '0:45',
-      signals: ['synthetic-pitch', 'robotic-rhythm', 'missing-freq-bands']
+      signals: ['synthetic-pitch', 'robotic-rhythm', 'missing-freq-bands'],
+      isBlocked: false
     }
   ]);
+
+  // Handle WebSocket for Live Stats
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socketUrl = `${protocol}//${window.location.host}`;
+    const socket = new WebSocket(socketUrl);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'STATS_UPDATE') {
+        setDashboardStats(data.data);
+      }
+    };
+
+    socket.onerror = (error) => console.error('WebSocket Error:', error);
+    socket.onclose = () => console.log('WebSocket Connection Closed');
+
+    return () => socket.close();
+  }, []);
+
+  // Handle Notification Permission
+  useEffect(() => {
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const requestNotificationPermission = async () => {
+    if (!("Notification" in window)) return;
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+  };
+
+  const sendOSNotification = (score: number, label: string) => {
+    if (notificationPermission === 'granted') {
+      const title = `GUARDIAN ALERT: ${label} Detected`;
+      const options = {
+        body: `Continuous monitoring identified a ${score}% risk factor on the current audio signal. Immediate action recommended.`,
+        icon: '/favicon.ico', // Fallback, could use a specific alert icon if available
+        tag: 'guardian-alert',
+        silent: false
+      };
+      new Notification(title, options);
+    }
+  };
+
+  const toggleBlock = (id: string) => {
+    setHistory(prev => prev.map(item => 
+      item.id === id ? { ...item, isBlocked: !item.isBlocked } : item
+    ));
+  };
 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([
     { id: '1', title: 'Phone State Observer', description: 'Monitoring OFFHOOK signal', status: 'idle', icon: <Phone /> },
@@ -131,6 +193,12 @@ export default function App() {
       interval = setInterval(() => {
         const newScore = Math.floor(Math.random() * 30) + (Math.random() > 0.8 ? 60 : 10);
         setRiskScore(newScore);
+
+        if (newScore > 75) {
+          sendOSNotification(newScore, 'DEEPFAKE');
+        } else if (newScore > 50) {
+          sendOSNotification(newScore, 'SUSPICIOUS');
+        }
         
         setWorkflowSteps(prev => prev.map(s => {
           if (s.id === '4') return { ...s, status: 'active' };
@@ -317,9 +385,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button className="p-2 rounded-full hover:bg-bg transition-colors relative text-text-secondary">
+            <button 
+              onClick={requestNotificationPermission}
+              className={`p-2 rounded-full transition-colors relative ${notificationPermission === 'granted' ? 'text-accent' : 'text-text-secondary hover:bg-bg'}`}
+              title={notificationPermission === 'granted' ? 'OS Notifications Active' : 'Enable OS Notifications'}
+            >
                <Bell className="w-5 h-5" />
-               <span className="absolute top-2 right-2 w-2 h-2 bg-danger rounded-full border border-white" />
+               {notificationPermission === 'granted' ? (
+                 <span className="absolute top-2 right-2 w-2 h-2 bg-accent rounded-full border border-white" />
+               ) : (
+                 <span className="absolute top-2 right-2 w-2 h-2 bg-danger rounded-full border border-white" />
+               )}
             </button>
             <button className="bg-accent text-white px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-sm hover:brightness-110 px-6">
                + New Action
@@ -339,10 +415,10 @@ export default function App() {
               >
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <StatCard title="Calls Monitored" value="1,284" icon={Phone} trend="+12%" />
-                  <StatCard title="Synthetic Detected" value="47" icon={ShieldAlert} trend="+2%" />
-                  <StatCard title="Accuracy Rate" value="99.9%" icon={ShieldCheck} />
-                  <StatCard title="Mean Latency" value="120ms" icon={Zap} trend="-4ms" />
+                  <StatCard title="Calls Monitored" value={dashboardStats.callsMonitored.toLocaleString()} icon={Phone} trend="+12%" />
+                  <StatCard title="Synthetic Detected" value={dashboardStats.syntheticDetected.toLocaleString()} icon={ShieldAlert} trend="+2%" />
+                  <StatCard title="Accuracy Rate" value={`${dashboardStats.accuracyRate}%`} icon={ShieldCheck} />
+                  <StatCard title="Mean Latency" value={`${dashboardStats.meanLatency}ms`} icon={Zap} trend="-4ms" />
                 </div>
 
                 {/* Simulation Area */}
@@ -490,22 +566,29 @@ export default function App() {
                             <div className={`p-3 rounded-xl border ${getVerdict(item.riskScore).bg}`}>
                               {item.riskScore > 75 ? <XCircle className="w-5 h-5 text-danger" /> : <CheckCircle2 className="w-5 h-5 text-accent" />}
                             </div>
-                            <div className="flex-1 grid grid-cols-2 md:grid-cols-4 items-center gap-4">
+                            <div className="flex-1 grid grid-cols-3 md:grid-cols-4 items-center gap-4">
                               <div>
-                                <div className="text-sm font-semibold">{item.phoneNumber}</div>
-                                <div className="text-[10px] font-mono text-text-secondary uppercase">{item.timestamp.toLocaleTimeString()}</div>
+                                <div className="text-sm font-semibold text-text-primary">{item.phoneNumber}</div>
+                                <div className="text-[10px] font-bold text-text-tertiary uppercase">{item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                               </div>
-                              <div className="hidden md:block">
-                                <div className="text-[10px] text-text-secondary font-mono uppercase tracking-wider mb-1">Duration</div>
-                                <div className="text-xs font-medium">{item.duration}</div>
+                              <div className="flex flex-col">
+                                <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Call Duration</div>
+                                <div className="text-xs font-semibold text-text-secondary">{item.duration}</div>
                               </div>
                               <div>
-                                <div className="text-[10px] text-text-secondary font-mono uppercase tracking-wider mb-1">Risk Score</div>
-                                <div className={`text-sm font-mono font-bold ${item.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{item.riskScore}%</div>
+                                <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Risk Score</div>
+                                <div className={`text-sm font-bold ${item.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{item.riskScore}%</div>
                               </div>
-                              <div className="text-right group-hover:translate-x-1 transition-transform">
-                                <button className="p-2 transition-colors hover:bg-white/10 rounded-lg">
-                                  <ArrowRight className="w-4 h-4 text-text-secondary" />
+                              <div className="text-right flex items-center justify-end gap-2 pr-1">
+                                <button 
+                                  onClick={() => toggleBlock(item.id)}
+                                  className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
+                                  title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
+                                >
+                                  <Ban className="w-4 h-4" />
+                                </button>
+                                <button className="p-2 transition-colors hover:bg-bg rounded-lg text-text-tertiary">
+                                  <ArrowRight className="w-4 h-4" />
                                 </button>
                               </div>
                             </div>
@@ -672,7 +755,7 @@ export default function App() {
                         <th className="px-6 py-5">Origin</th>
                         <th className="px-6 py-5 text-right font-mono">Timestamp</th>
                         <th className="px-6 py-5">Risk Factor</th>
-                        <th className="px-6 py-5">Session</th>
+                        <th className="px-6 py-5">Call Duration</th>
                         <th className="px-6 py-5">Verdict</th>
                         <th className="px-6 py-5 text-right">Action</th>
                       </tr>
@@ -700,9 +783,18 @@ export default function App() {
                               </span>
                            </td>
                            <td className="px-6 py-5 text-right">
-                             <button className="p-2 hover:bg-bg rounded-lg transition-colors text-text-tertiary">
-                               <MoreVertical className="w-4 h-4" />
-                             </button>
+                             <div className="flex items-center justify-end gap-2">
+                               <button 
+                                 onClick={() => toggleBlock(item.id)}
+                                 className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
+                                 title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
+                               >
+                                 <Ban className="w-3.5 h-3.5" />
+                               </button>
+                               <button className="p-2 hover:bg-bg rounded-lg transition-colors text-text-tertiary">
+                                 <MoreVertical className="w-4 h-4" />
+                               </button>
+                             </div>
                            </td>
                          </tr>
                        ))}
