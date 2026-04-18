@@ -138,6 +138,7 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [historyFilter, setHistoryFilter] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [blockedNumbers, setBlockedNumbers] = useState<string[]>([]);
   
   const getDevices = async () => {
     try {
@@ -171,6 +172,7 @@ export default function App() {
             document.documentElement.classList.add('dark');
           }
         }
+        if (parsed.blockedNumbers !== undefined) setBlockedNumbers(parsed.blockedNumbers);
       } catch (e) {
         console.error("Failed to parse settings", e);
       }
@@ -246,7 +248,8 @@ export default function App() {
         noiseReductionIntensity,
         selectedDeviceId,
         voiceControlEnabled,
-        isDarkMode
+        isDarkMode,
+        blockedNumbers
       }));
       setSaveStatus('saved');
       
@@ -255,7 +258,7 @@ export default function App() {
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled, isDarkMode]);
+  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled, isDarkMode, blockedNumbers]);
 
   // Handle Dark mode toggle class
   useEffect(() => {
@@ -1868,6 +1871,48 @@ export default function App() {
                              <div className="w-8 h-4 bg-border rounded-full relative">
                                 <div className="absolute left-1 top-1 w-2 h-2 bg-white rounded-full" />
                              </div>
+                          </div>
+                       </div>
+                    </div>
+
+                    {/* Blocked Numbers Section */}
+                    <div className="pt-10 border-t border-border space-y-6">
+                       <div className="flex items-center gap-2 mb-2">
+                          <Ban className="w-4 h-4 text-danger" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Blocked Numbers</label>
+                       </div>
+                       <div className="space-y-4">
+                          <div className="flex gap-2">
+                             <input 
+                               type="text"
+                               placeholder="Enter phone number..."
+                               className="flex-1 bg-card border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-accent text-text-primary"
+                               onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                     const val = e.currentTarget.value;
+                                     if (val && !blockedNumbers.includes(val)) {
+                                        setBlockedNumbers([...blockedNumbers, val]);
+                                        e.currentTarget.value = '';
+                                     }
+                                  }
+                               }}
+                             />
+                             <button className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
+                                <Plus className="w-5 h-5" />
+                             </button>
+                          </div>
+                          <div className="space-y-2">
+                             {blockedNumbers.map(number => (
+                                <div key={number} className="flex items-center justify-between p-3 bg-bg border border-border rounded-lg">
+                                   <span className="text-sm font-mono text-text-secondary">{number}</span>
+                                   <button 
+                                      onClick={() => setBlockedNumbers(blockedNumbers.filter(n => n !== number))}
+                                      className="p-1.5 hover:bg-danger/10 text-text-tertiary hover:text-danger rounded-md transition-all"
+                                   >
+                                      <Trash2 className="w-4 h-4" />
+                                   </button>
+                                </div>
+                             ))}
                           </div>
                        </div>
                     </div>
