@@ -69,6 +69,7 @@ interface DetectionResult {
   duration: string;
   signals: string[];
   isBlocked?: boolean;
+  isVerified?: boolean;
 }
 
 interface WorkflowStep {
@@ -141,7 +142,9 @@ export default function App() {
   const [historyFilter, setHistoryFilter] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [blockedNumbers, setBlockedNumbers] = useState<string[]>([]);
+  const [verifiedNumbers, setVerifiedNumbers] = useState<string[]>([]);
   const [numberToRemove, setNumberToRemove] = useState<string | null>(null);
+  const [numberToUnverify, setNumberToUnverify] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [toast, setToast] = useState<{message: string} | null>(null);
   
@@ -178,6 +181,7 @@ export default function App() {
           }
         }
         if (parsed.blockedNumbers !== undefined) setBlockedNumbers(parsed.blockedNumbers);
+        if (parsed.verifiedNumbers !== undefined) setVerifiedNumbers(parsed.verifiedNumbers);
       } catch (e) {
         console.error("Failed to parse settings", e);
       }
@@ -254,14 +258,15 @@ export default function App() {
         selectedDeviceId,
         voiceControlEnabled,
         isDarkMode,
-        blockedNumbers
+        blockedNumbers,
+        verifiedNumbers
       }));
       setSaveStatus('idle');
       setToast({ message: 'Settings saved!' });
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled, isDarkMode, blockedNumbers]);
+  }, [autoBlockEnabled, autoBlockThreshold, noiseReductionEnabled, noiseReductionIntensity, selectedDeviceId, voiceControlEnabled, isDarkMode, blockedNumbers, verifiedNumbers]);
 
   // Handle Dark mode toggle class
   useEffect(() => {
@@ -379,6 +384,30 @@ export default function App() {
     }
   };
 
+  const toggleVerify = (id: string) => {
+    const item = history.find(i => i.id === id);
+    if (!item) return;
+
+    const phoneNumber = item.phoneNumber;
+    const isNowVerified = !item.isVerified;
+
+    setHistory(prev => prev.map(i => 
+      i.id === id ? { ...i, isVerified: isNowVerified, isBlocked: isNowVerified ? false : i.isBlocked } : i
+    ));
+
+    setVerifiedNumbers(prev => {
+      if (isNowVerified) {
+        return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
+      } else {
+        return prev.filter(n => n !== phoneNumber);
+      }
+    });
+
+    if (isNowVerified) {
+      setBlockedNumbers(prev => prev.filter(n => n !== phoneNumber));
+    }
+  };
+
   const toggleBlock = (id: string) => {
     const item = history.find(i => i.id === id);
     if (!item) return;
@@ -387,7 +416,7 @@ export default function App() {
     const isNowBlocked = !item.isBlocked;
 
     setHistory(prev => prev.map(i => 
-      i.id === id ? { ...i, isBlocked: isNowBlocked } : i
+      i.id === id ? { ...i, isBlocked: isNowBlocked, isVerified: isNowBlocked ? false : i.isVerified } : i
     ));
 
     setBlockedNumbers(prev => {
@@ -397,6 +426,11 @@ export default function App() {
         return prev.filter(n => n !== phoneNumber);
       }
     });
+
+    if (isNowBlocked) {
+      setVerifiedNumbers(prev => prev.filter(n => n !== phoneNumber));
+    }
+
     setConfirmBlockId(null);
   };
 
@@ -483,7 +517,11 @@ export default function App() {
       startAudioViz();
 
       interval = setInterval(() => {
-        const newScore = Math.floor(Math.random() * 35) + (Math.random() > 0.82 ? 62 : 8);
+        const isVerified = currentCallNumber && verifiedNumbers.includes(currentCallNumber);
+        const newScore = isVerified 
+          ? Math.floor(Math.random() * 3) // Extremely low score for verified agents
+          : Math.floor(Math.random() * 35) + (Math.random() > 0.82 ? 62 : 8);
+          
         setRiskScore(newScore);
 
         setDashboardStats(prev => ({
@@ -498,16 +536,18 @@ export default function App() {
           return;
         }
 
-        if (autoBlockEnabled && newScore >= autoBlockThreshold) {
+        if (autoBlockEnabled && newScore >= autoBlockThreshold && !isVerified) {
           setIsCallActive(false);
           // In a real app, we would add the currentCallNumber to the blocklist here
           return;
         }
 
-        if (newScore > 75) {
-          sendOSNotification(newScore, 'DEEPFAKE');
-        } else if (newScore > 50) {
-          sendOSNotification(newScore, 'SUSPICIOUS');
+        if (!isVerified) {
+          if (newScore > 75) {
+            sendOSNotification(newScore, 'DEEPFAKE');
+          } else if (newScore > 50) {
+            sendOSNotification(newScore, 'SUSPICIOUS');
+          }
         }
         
         setWorkflowSteps(prev => prev.map(s => {
@@ -527,7 +567,7 @@ export default function App() {
       clearInterval(interval);
       stopAudioViz();
     };
-  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId, blockedNumbers]);
+  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId, blockedNumbers, verifiedNumbers]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1382,6 +1422,14 @@ export default function App() {
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                                 <button 
+                                  onClick={() => toggleVerify(item.id)}
+                                  className={`p-2 transition-all rounded-lg border ${item.isVerified ? 'bg-accent text-white border-accent' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
+                                  title={item.isVerified ? 'Voice Verified' : 'Verify Voice Fingerprint'}
+                                  aria-label={item.isVerified ? 'Verified voice details' : 'Verify this voice fingerprint'}
+                                >
+                                  <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                                </button>
+                                <button 
                                   onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
                                   title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
@@ -1920,6 +1968,58 @@ export default function App() {
                        </div>
                     </div>
 
+                    {/* Verified Voice Fingerprints Section */}
+                    <div className="pt-10 border-t border-border space-y-6">
+                       <div className="flex items-center gap-2 mb-2">
+                          <ShieldCheck className="w-4 h-4 text-accent" />
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Verified Voice Fingerprints</label>
+                       </div>
+                       <div className="space-y-4">
+                          <p className="text-[11px] text-text-tertiary max-w-sm">Trusted identities with biometric voice validation. Risk assessments are suppressed for these callers.</p>
+                          <div className="flex gap-2">
+                             <input 
+                               type="text"
+                               placeholder="Add trusted number..."
+                               className="flex-1 bg-card border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-accent text-text-primary"
+                               onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                     const val = e.currentTarget.value;
+                                     if (val && !verifiedNumbers.includes(val)) {
+                                        setVerifiedNumbers([...verifiedNumbers, val]);
+                                        setBlockedNumbers(prev => prev.filter(n => n !== val));
+                                        e.currentTarget.value = '';
+                                     }
+                                  }
+                               }}
+                             />
+                             <button className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
+                                <Plus className="w-5 h-5" />
+                             </button>
+                          </div>
+                          <div className="space-y-2">
+                             {verifiedNumbers.map(number => (
+                                <div key={number} className="flex items-center justify-between p-3 bg-bg border border-border rounded-lg">
+                                   <div className="flex items-center gap-3">
+                                      <div className="w-2 h-2 rounded-full bg-accent" />
+                                      <span className="text-sm font-mono text-text-secondary">{number}</span>
+                                   </div>
+                                   <button 
+                                      onClick={() => setNumberToUnverify(number)}
+                                      className="p-1.5 hover:bg-danger/10 text-text-tertiary hover:text-danger rounded-md transition-all"
+                                   >
+                                      <Trash2 className="w-4 h-4" />
+                                   </button>
+                                </div>
+                             ))}
+                             {verifiedNumbers.length === 0 && (
+                                <div className="text-center py-6 bg-bg/30 border border-dashed border-border rounded-xl">
+                                   <p className="text-[10px] text-text-tertiary font-bold uppercase tracking-widest">No verified fingerprints enrolled</p>
+                                </div>
+                             )}
+                          </div>
+                       </div>
+                    </div>
+
                     {/* Blocked Numbers Section */}
                     <div className="pt-10 border-t border-border space-y-6">
                        <div className="flex items-center gap-2 mb-2">
@@ -2047,6 +2147,54 @@ export default function App() {
                       className="w-full py-3 bg-bg text-text-secondary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-border transition-colors"
                     >
                       Dismiss
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {numberToUnverify && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setNumberToUnverify(null)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                role="dialog"
+                aria-modal="true"
+                className="bg-card border border-border w-full max-w-sm rounded-3xl p-8 relative z-10 shadow-2xl"
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-16 h-16 rounded-full bg-accent/10 text-accent flex items-center justify-center mb-6">
+                    <ShieldCheck className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Remove Verification?</h3>
+                  <p className="text-xs text-text-tertiary leading-relaxed mb-8">
+                    Removing <span className="text-text-primary font-bold">{numberToUnverify}</span> will disable biometric bypass and subject the caller to full AASIST analysis.
+                  </p>
+                  <div className="flex flex-col w-full gap-3">
+                    <button 
+                      onClick={() => {
+                        setVerifiedNumbers(prev => prev.filter(n => n !== numberToUnverify));
+                        setNumberToUnverify(null);
+                        setToast({ message: 'Voice fingerprint removed' });
+                      }}
+                      className="w-full py-3 bg-accent text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-accent/20 hover:brightness-110 transition-all"
+                    >
+                      Remove Verification
+                    </button>
+                    <button 
+                      onClick={() => setNumberToUnverify(null)}
+                      className="w-full py-3 bg-bg text-text-secondary rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-border transition-colors"
+                    >
+                      Keep Verified
                     </button>
                   </div>
                 </div>
