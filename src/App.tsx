@@ -105,11 +105,12 @@ interface DetectionResult {
   timestamp: Date;
   phoneNumber: string;
   riskScore: number; // 0 to 100
-  verdict: 'authentic' | 'suspicious' | 'deepfake';
+  verdict: 'authentic' | 'suspicious' | 'deepfake' | 'error';
   duration: string;
   signals: string[];
   isBlocked?: boolean;
   isVerified?: boolean;
+  error?: string;
 }
 
 interface WorkflowStep {
@@ -872,7 +873,27 @@ export default function App() {
       
     } catch (err: any) {
       console.error("Audit error:", err);
-      const errorMessage = err.message || "";
+      const errorMessage = err.message || "Unknown error";
+      
+      // Log error to history if user is logged in
+      if (user) {
+        try {
+          await addDoc(collection(db, 'history'), {
+            timestamp: serverTimestamp(),
+            phoneNumber: 'UPLOADED_SAMPLE',
+            riskScore: 0,
+            verdict: 'error',
+            duration: '--',
+            signals: ['ERR: Analysis Failed'],
+            isBlocked: false,
+            ownerId: user.uid,
+            error: errorMessage
+          });
+        } catch (logErr) {
+          console.error("Failed to log audit error to history:", logErr);
+        }
+      }
+
       if (errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("quota")) {
         setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a minute." });
       } else if (errorMessage.includes("MISSING_API_KEY")) {
@@ -1157,13 +1178,14 @@ export default function App() {
     }
   };
 
-  const getVerdict = (score: number) => {
+  const getVerdict = (score: number, explicitVerdict?: string) => {
+    if (explicitVerdict === 'error') return { label: 'ANALYSIS FAIL', color: 'text-text-tertiary', icon: XCircle, bg: 'bg-border/50 border-border' };
     if (score > 75) return { label: 'DEEPFAKE', color: 'text-danger', icon: ShieldAlert, bg: 'bg-danger/5 border-danger/20' };
     if (score > 40) return { label: 'SUSPICIOUS', color: 'text-warning', icon: AlertTriangle, bg: 'bg-warning/5 border-warning/20' };
-    return { label: 'PROTECTED', color: 'text-accent', icon: ShieldCheck, bg: 'bg-accent/5 border-accent/20' };
+    return { label: 'AUTHENTIC', color: 'text-accent', icon: ShieldCheck, bg: 'bg-accent/5 border-accent/20' };
   };
 
-  const verdict = useMemo(() => getVerdict(riskScore), [riskScore]);
+  const verdictData = useMemo(() => getVerdict(riskScore, aiAnalysis?.verdict), [riskScore, aiAnalysis]);
 
   return (
     <div className="min-h-screen flex flex-col sm:flex-row">
@@ -1550,7 +1572,7 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className={`p-8 rounded-xl border transition-all duration-300 min-h-[240px] flex flex-col items-center justify-center ${isCallActive ? verdict.bg : 'bg-column/50 border-dashed border-border'}`}>
+                          <div className={`p-8 rounded-xl border transition-all duration-300 min-h-[240px] flex flex-col items-center justify-center ${isCallActive ? verdictData.bg : 'bg-column/50 border-dashed border-border'}`}>
                              {permissionError && !isCallActive ? (
                                <div className="text-center px-4 max-w-sm">
                                  <div className="w-12 h-12 rounded-full bg-danger/10 flex items-center justify-center mx-auto mb-4">
@@ -1597,10 +1619,10 @@ export default function App() {
                                    </div>
                                  )}
                                  <div className="flex flex-col items-center mb-8">
-                                   <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${verdict.color} border-current bg-card shadow-sm`}>
-                                     <verdict.icon className="w-6 h-6" />
+                                   <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 border ${verdictData.color} border-current bg-card shadow-sm`}>
+                                     <verdictData.icon className="w-6 h-6" />
                                    </div>
-                                   <h4 className={`text-3xl font-black tracking-tighter ${verdict.color}`}>{verdict.label}</h4>
+                                   <h4 className={`text-3xl font-black tracking-tighter ${verdictData.color}`}>{verdictData.label}</h4>
                                    <p className="text-[10px] font-bold uppercase tracking-widest mt-1 text-text-tertiary">Real-time Inference Profile</p>
                                  </div>
 
@@ -1609,7 +1631,7 @@ export default function App() {
                                       <canvas ref={canvasRef} width={400} height={40} className="w-full opacity-40 rounded-lg" />
                                    </div>
                                    <div className="text-right">
-                                     <div className={`text-4xl font-bold tracking-tighter leading-none ${verdict.color}`}>{riskScore}<span className="text-base font-medium opacity-50 ml-0.5">%</span></div>
+                                     <div className={`text-4xl font-bold tracking-tighter leading-none ${verdictData.color}`}>{riskScore}<span className="text-base font-medium opacity-50 ml-0.5">%</span></div>
                                      <div className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary mt-1">Risk Factor</div>
                                    </div>
                                  </div>
@@ -1817,24 +1839,26 @@ export default function App() {
                         </button>
                       </div>
                       <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border">
-                        {history.map((item) => (
-                          <div key={item.id} className="p-4 flex items-center gap-6 hover:bg-card transition-colors cursor-default group">
-                            <div className={`p-3 rounded-xl border ${getVerdict(item.riskScore).bg}`}>
-                              {item.riskScore > 75 ? <XCircle className="w-5 h-5 text-danger" /> : <CheckCircle2 className="w-5 h-5 text-accent" />}
-                            </div>
-                            <div className="flex-1 grid grid-cols-3 md:grid-cols-4 items-center gap-4">
-                              <div>
-                                <div className="text-sm font-semibold text-text-primary">{item.phoneNumber}</div>
-                                <div className="text-[10px] font-bold text-text-tertiary uppercase">{item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                        {history.map((item) => {
+                          const itemVerdict = getVerdict(item.riskScore, item.verdict);
+                          return (
+                            <div key={item.id} className="p-4 flex items-center gap-6 hover:bg-card transition-colors cursor-default group">
+                              <div className={`p-3 rounded-xl border ${itemVerdict.bg}`}>
+                                <itemVerdict.icon className={`w-5 h-5 ${itemVerdict.color}`} />
                               </div>
-                              <div className="flex flex-col">
-                                <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Call Duration</div>
-                                <div className="text-xs font-semibold text-text-secondary">{item.duration}</div>
-                              </div>
-                              <div>
-                                <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Risk Score</div>
-                                <div className={`text-sm font-bold ${item.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{item.riskScore}%</div>
-                              </div>
+                              <div className="flex-1 grid grid-cols-3 md:grid-cols-4 items-center gap-4">
+                                <div>
+                                  <div className="text-sm font-semibold text-text-primary">{item.phoneNumber}</div>
+                                  <div className="text-[10px] font-bold text-text-tertiary uppercase">{item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                </div>
+                                <div className="flex flex-col">
+                                  <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Call Duration</div>
+                                  <div className="text-xs font-semibold text-text-secondary">{item.duration}</div>
+                                </div>
+                                <div>
+                                  <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-wider mb-0.5">Risk Score</div>
+                                  <div className={`text-sm font-bold ${itemVerdict.color}`}>{item.riskScore}%</div>
+                                </div>
                               <div className="text-right flex items-center justify-end gap-2 pr-1">
                                 <button 
                                   onClick={() => deleteHistoryItem(item.id)}
@@ -1866,7 +1890,8 @@ export default function App() {
                               </div>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
                       </div>
                     </div>
                   </div>

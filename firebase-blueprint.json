@@ -8,11 +8,12 @@
         "timestamp": { "type": "string", "format": "date-time" },
         "phoneNumber": { "type": "string" },
         "riskScore": { "type": "number" },
-        "verdict": { "type": "string", "enum": ["authentic", "suspicious", "deepfake"] },
+        "verdict": { "type": "string", "enum": ["authentic", "suspicious", "deepfake", "error"] },
         "duration": { "type": "string" },
         "signals": { "type": "array", "items": { "type": "string" } },
         "isBlocked": { "type": "boolean" },
         "isVerified": { "type": "boolean" },
+        "error": { "type": "string" },
         "ownerId": { "type": "string" }
       },
       "required": ["timestamp", "phoneNumber", "riskScore", "verdict", "signals", "ownerId"]

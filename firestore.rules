@@ -27,7 +27,7 @@ service cloud.firestore {
         && data.timestamp is timestamp
         && data.phoneNumber is string && data.phoneNumber.size() <= 64
         && data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100
-        && data.verdict in ['authentic', 'suspicious', 'deepfake']
+        && data.verdict in ['authentic', 'suspicious', 'deepfake', 'error']
         && data.signals is list
         && data.signals.size() <= 50
         && data.ownerId == request.auth.uid

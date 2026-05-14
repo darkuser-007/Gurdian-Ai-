@@ -1,9 +1,18 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize the Gemini API client using the correct SDK and model aliases
-const ai = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || "" 
-});
+// Initialize the Gemini API client lazily to ensure environment variables are loaded
+let aiClient: GoogleGenAI | null = null;
+
+function getAiClient() {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("MISSING_API_KEY: Gemini API Key is missing. Please add your GEMINI_API_KEY in the Settings menu (API Keys & Secrets).");
+    }
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 
 export interface AIAnalysisResult {
   riskScore: number;
@@ -17,9 +26,7 @@ export interface AIAnalysisResult {
  */
 export async function analyzeAudioForDeepfake(fileBase64: string, mimeType: string): Promise<AIAnalysisResult> {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("MISSING_API_KEY: Gemini API Key is not configured. Please add it in the Settings menu.");
-    }
+    const ai = getAiClient();
 
     const prompt = `
       You are a world-class Forensic Audio Engineer and Neural Biometrics Specialist. 
