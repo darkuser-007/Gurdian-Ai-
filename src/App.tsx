@@ -53,10 +53,50 @@ import {
   Sun,
   Moon,
   MessageSquare,
-  Bot
+  Bot,
+  RotateCcw,
+  Loader2,
+  LogOut,
+  LogIn,
+  User as UserIcon,
+  ShieldAlert as ShieldAlertIcon
 } from 'lucide-react';
+import { analyzeAudioForDeepfake } from './services/geminiService';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMicVAD } from '@ricky0123/vad-react';
+import * as ort from 'onnxruntime-web/wasm';
 import { ResponsiveContainer, LineChart, Line, YAxis } from 'recharts';
+
+// Suppress ONNX runtime warnings about unused initializers
+if (typeof window !== 'undefined') {
+  (ort as any).env.logLevel = 'error';
+  (ort as any).env.logSeverityLevel = 3;
+  (ort as any).env.debug = false;
+}
+
+// --- Firebase ---
+import { auth, db } from './lib/firebase';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut,
+  User
+} from 'firebase/auth';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot, 
+  addDoc, 
+  serverTimestamp, 
+  deleteDoc, 
+  doc, 
+  updateDoc,
+  Timestamp,
+  getDocFromServer
+} from 'firebase/firestore';
 
 // --- Types ---
 
@@ -147,7 +187,174 @@ export default function App() {
   const [numberToUnverify, setNumberToUnverify] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [toast, setToast] = useState<{message: string} | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<any | null>(null);
+  const [isSpeechDetected, setIsSpeechDetected] = useState(false);
+  const [speechSegments, setSpeechSegments] = useState<number>(0);
+
+  const vad = useMicVAD({
+    baseAssetPath: "https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/",
+    onnxWASMBasePath: "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/",
+    model: "v5",
+    // Suppress ONNX runtime warnings in the worker/worklet context
+    ortConfig: (ortInstance: any) => {
+      // Use both string and numeric log levels for maximum compatibility
+      ortInstance.env.logLevel = "error";
+      (ortInstance.env as any).logSeverityLevel = 3;
+      ortInstance.env.debug = false;
+
+      // Monkey-patch InferenceSession.create to inject log suppression options
+      const originalCreate = ortInstance.InferenceSession.create;
+      ortInstance.InferenceSession.create = async function (
+        bufferOrPath: any,
+        options: any
+      ) {
+        const sessionOptions = {
+          logSeverityLevel: 3,
+          logVerbosityLevel: 0,
+          graphOptimizationLevel: "disabled",
+          ...options,
+        };
+        // Ensure our suppression wins if options were also provided
+        sessionOptions.logSeverityLevel = 3;
+        sessionOptions.graphOptimizationLevel = "disabled";
+
+        return originalCreate.call(
+          ortInstance.InferenceSession,
+          bufferOrPath,
+          sessionOptions
+        );
+      };
+    },
+    onSpeechStart: () => {
+      setIsSpeechDetected(true);
+      setSpeechSegments(prev => prev + 1);
+    },
+    onSpeechEnd: () => {
+      setIsSpeechDetected(false);
+    },
+  });
+
+  useEffect(() => {
+    if (isRecording) {
+      vad.start();
+    } else {
+      vad.pause();
+    }
+  }, [isRecording, vad]);
   
+  // Firebase State
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Firestore Error Handler
+  const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
+    const errInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    setToast({ message: `Database error: ${errInfo.error}` });
+  };
+
+  // Auth Effect
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // History Real-time Listener
+  useEffect(() => {
+    if (!user) {
+      setHistory([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'history'),
+      where('ownerId', '==', user.uid),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const results: DetectionResult[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        results.push({
+          id: doc.id,
+          timestamp: (data.timestamp as Timestamp).toDate(),
+          phoneNumber: data.phoneNumber,
+          riskScore: data.riskScore,
+          verdict: data.verdict,
+          duration: data.duration,
+          signals: data.signals,
+          isBlocked: data.isBlocked,
+          isVerified: data.isVerified
+        });
+      });
+      setHistory(results);
+    }, (error) => {
+      handleFirestoreError(error, 'list', 'history');
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Test Firebase Connection on boot
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    };
+    testConnection();
+  }, []);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    // Force account selection to help stabilize the popup
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
+    try {
+      await signInWithPopup(auth, provider);
+      setToast({ message: 'Signed in successfully!' });
+    } catch (error: any) {
+      console.error("Login Error:", error);
+      
+      if (error.code === 'auth/popup-closed-by-user') {
+        setToast({ message: 'Sign-in popup was closed. Please try again and keep the window open.' });
+      } else if (error.code === 'auth/cancelled-by-user') {
+        setToast({ message: 'Sign-in was cancelled.' });
+      } else if (error.code === 'auth/popup-blocked') {
+        setToast({ message: 'Sign-in popup was blocked by your browser. Please allow popups for this site.' });
+      } else {
+        setToast({ message: `Sign in failed: ${error.message || 'Unknown error'}` });
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setToast({ message: 'Signed out.' });
+    } catch (error) {
+      console.error("Logout Error:", error);
+    }
+  };
+
   const getDevices = async () => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -204,28 +411,7 @@ export default function App() {
     snr: 48
   });
   const [riskScore, setRiskScore] = useState(0);
-  const [history, setHistory] = useState<DetectionResult[]>([
-    {
-      id: '1',
-      timestamp: new Date(Date.now() - 3600000),
-      phoneNumber: '+1 (555) 012-3456',
-      riskScore: 12,
-      verdict: 'authentic',
-      duration: '4:20',
-      signals: ['consistent-prosody', 'natural-noise', 'low-latency'],
-      isBlocked: false
-    },
-    {
-      id: '2',
-      timestamp: new Date(Date.now() - 7200000),
-      phoneNumber: '+44 20 7946 0123',
-      riskScore: 88,
-      verdict: 'deepfake',
-      duration: '0:45',
-      signals: ['synthetic-pitch', 'robotic-rhythm', 'missing-freq-bands'],
-      isBlocked: false
-    }
-  ]);
+  const [history, setHistory] = useState<DetectionResult[]>([]);
 
   const filteredHistory = useMemo(() => {
     if (!historyFilter) return history;
@@ -384,58 +570,73 @@ export default function App() {
     }
   };
 
-  const toggleVerify = (id: string) => {
+  const toggleVerify = async (id: string) => {
     const item = history.find(i => i.id === id);
-    if (!item) return;
+    if (!item || !user) return;
 
     const phoneNumber = item.phoneNumber;
     const isNowVerified = !item.isVerified;
 
-    setHistory(prev => prev.map(i => 
-      i.id === id ? { ...i, isVerified: isNowVerified, isBlocked: isNowVerified ? false : i.isBlocked } : i
-    ));
+    try {
+      await updateDoc(doc(db, 'history', id), {
+        isVerified: isNowVerified,
+        isBlocked: isNowVerified ? false : (item.isBlocked || false)
+      });
 
-    setVerifiedNumbers(prev => {
+      setVerifiedNumbers(prev => {
+        if (isNowVerified) {
+          return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
+        } else {
+          return prev.filter(n => n !== phoneNumber);
+        }
+      });
+
       if (isNowVerified) {
-        return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
-      } else {
-        return prev.filter(n => n !== phoneNumber);
+        setBlockedNumbers(prev => prev.filter(n => n !== phoneNumber));
       }
-    });
-
-    if (isNowVerified) {
-      setBlockedNumbers(prev => prev.filter(n => n !== phoneNumber));
+    } catch (error) {
+      handleFirestoreError(error, 'update', `history/${id}`);
     }
   };
 
-  const toggleBlock = (id: string) => {
+  const toggleBlock = async (id: string) => {
     const item = history.find(i => i.id === id);
-    if (!item) return;
+    if (!item || !user) return;
 
     const phoneNumber = item.phoneNumber;
     const isNowBlocked = !item.isBlocked;
 
-    setHistory(prev => prev.map(i => 
-      i.id === id ? { ...i, isBlocked: isNowBlocked, isVerified: isNowBlocked ? false : i.isVerified } : i
-    ));
+    try {
+      await updateDoc(doc(db, 'history', id), {
+        isBlocked: isNowBlocked,
+        isVerified: isNowBlocked ? false : (item.isVerified || false)
+      });
 
-    setBlockedNumbers(prev => {
+      setBlockedNumbers(prev => {
+        if (isNowBlocked) {
+          return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
+        } else {
+          return prev.filter(n => n !== phoneNumber);
+        }
+      });
+
       if (isNowBlocked) {
-        return prev.includes(phoneNumber) ? prev : [...prev, phoneNumber];
-      } else {
-        return prev.filter(n => n !== phoneNumber);
+        setVerifiedNumbers(prev => prev.filter(n => n !== phoneNumber));
       }
-    });
 
-    if (isNowBlocked) {
-      setVerifiedNumbers(prev => prev.filter(n => n !== phoneNumber));
+      setConfirmBlockId(null);
+    } catch (error) {
+      handleFirestoreError(error, 'update', `history/${id}`);
     }
-
-    setConfirmBlockId(null);
   };
 
-  const deleteHistoryItem = (id: string) => {
-    setHistory(prev => prev.filter(item => item.id !== id));
+  const deleteHistoryItem = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'history', id));
+    } catch (error) {
+      handleFirestoreError(error, 'delete', `history/${id}`);
+    }
   };
 
   const resetSettings = () => {
@@ -616,6 +817,68 @@ export default function App() {
     }
   };
 
+  const runDeepfakeAudit = async () => {
+    if (!uploadedFile || isAnalyzing) return;
+
+    if (speechSegments === 0 && uploadedFile.name.includes('capture-')) {
+      setToast({ message: "Forensic Warning: No neural speech activity identified. Accuracy may be degraded." });
+    }
+
+    setIsAnalyzing(true);
+    setAiAnalysis(null);
+    playUploadedFile(); // Start playback for visualization
+
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.readAsDataURL(uploadedFile);
+      });
+
+      const base64 = await base64Promise;
+      const result = await analyzeAudioForDeepfake(base64, uploadedFile.type);
+      
+      setAiAnalysis(result);
+      setRiskScore(result.riskScore);
+      
+      // Update history if user is logged in
+      if (user) {
+        try {
+          await addDoc(collection(db, 'history'), {
+            timestamp: serverTimestamp(),
+            phoneNumber: 'UPLOADED_SAMPLE',
+            riskScore: result.riskScore,
+            verdict: result.verdict,
+            duration: '--',
+            signals: result.signals,
+            isBlocked: false,
+            ownerId: user.uid
+          });
+          setToast({ message: `Analysis Complete: ${result.verdict.toUpperCase()}` });
+        } catch (error) {
+          handleFirestoreError(error, 'create', 'history');
+        }
+      } else {
+        setToast({ message: "Analysis complete, but history not saved (not logged in)." });
+      }
+      
+    } catch (err: any) {
+      console.error("Audit error:", err);
+      const errorMessage = err.message || "";
+      if (errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("quota")) {
+        setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a moment." });
+      } else {
+        setToast({ message: "AI Analysis failed. Check console for details." });
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const stopFilePlayback = () => {
     if (fileAudioSourceRef.current) {
       fileAudioSourceRef.current.stop();
@@ -656,16 +919,14 @@ export default function App() {
 
       recorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `guardian-capture-${Date.now()}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const file = new File([blob], `capture-${Date.now()}.webm`, { type: 'audio/webm' });
+        setUploadedFile(file);
+        setToast({ message: "Capture complete. Ready for neural audit." });
       };
 
       recorder.start();
       setIsRecording(true);
+      setSpeechSegments(0);
     } catch (err) {
       console.error("Recording error:", err);
     }
@@ -938,7 +1199,50 @@ export default function App() {
           </button>
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-border">
+        <div className="mt-auto pt-6 border-t border-border flex flex-col gap-4">
+          {isAuthLoading ? (
+            <div className="flex items-center gap-3 px-3 py-2 bg-bg rounded-lg border border-border animate-pulse">
+              <div className="w-8 h-8 rounded-full bg-border" />
+              <div className="h-2 w-20 bg-border rounded" />
+            </div>
+          ) : user ? (
+            <div className="flex items-center justify-between group">
+              <div className="flex items-center gap-3 overflow-hidden">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || 'User'} className="w-8 h-8 rounded-full border border-accent/20" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center">
+                    <UserIcon className="w-4 h-4 text-accent" />
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[11px] font-bold text-text-primary truncate">{user.displayName || 'Guardian User'}</span>
+                  <span className="text-[9px] text-text-tertiary truncate uppercase tracking-tighter">Verified Agent</span>
+                </div>
+              </div>
+              <button 
+                onClick={handleLogout}
+                className="p-2 text-text-tertiary hover:text-danger hover:bg-danger/5 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={handleLogin}
+              className="flex items-center gap-3 px-3 py-2 bg-accent/5 hover:bg-accent/10 border border-accent/20 rounded-lg transition-all text-left group"
+            >
+              <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-white shadow-sm">
+                <LogIn className="w-4 h-4" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[11px] font-bold text-text-primary uppercase tracking-wider">Sign In</span>
+                <span className="text-[9px] text-accent font-bold uppercase tracking-tighter">Sync Cloud Logs</span>
+              </div>
+            </button>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 px-3 py-2 bg-bg rounded-lg border border-border">
               <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
@@ -978,6 +1282,20 @@ export default function App() {
                   {isRecording && <span className="w-1.5 h-1.5 rounded-full bg-danger animate-pulse" />}
                   {isRecording ? 'Recording Active' : 'Auto-Capture Off'}
                 </span>
+                {isRecording && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex justify-end mt-1"
+                  >
+                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border transition-all ${isSpeechDetected ? 'bg-accent/10 border-accent/30 scale-105' : 'bg-bg border-border grayscale opacity-50'}`}>
+                      <Activity className={`w-2.5 h-2.5 ${isSpeechDetected ? 'text-accent animate-pulse' : 'text-text-tertiary'}`} />
+                      <span className={`text-[8px] font-bold uppercase tracking-tighter ${isSpeechDetected ? 'text-accent' : 'text-text-tertiary'}`}>
+                        {isSpeechDetected ? 'Speech Prob: 100%' : 'VAD: IDLE'}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
               </div>
               <button 
                 onClick={() => isRecording ? stopRecording() : startRecording()}
@@ -1098,7 +1416,15 @@ export default function App() {
                                 {isCallActive && <span className="ml-2 inline-flex h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
                               </h3>
                               {isCallActive && currentCallNumber && (
-                                <span className="text-[10px] font-mono text-text-tertiary mt-0.5">Origin: {currentCallNumber}</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-[10px] font-mono text-text-tertiary">Origin: {currentCallNumber}</span>
+                                  {verifiedNumbers.includes(currentCallNumber) && (
+                                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-accent/10 border border-accent/20 text-[8px] font-bold text-accent uppercase tracking-wider">
+                                      <ShieldCheck className="w-2.5 h-2.5" />
+                                      Verified
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
                             <div className="flex items-center gap-3">
@@ -1342,33 +1668,120 @@ export default function App() {
                       </div>
 
                       {uploadedFile ? (
-                        <div className="bg-bg/40 border border-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-6">
+                        <>
+                          <div className="bg-bg/40 border border-border rounded-xl p-6 flex flex-col md:flex-row items-center gap-6">
                           <div className="w-16 h-16 rounded-2xl bg-card flex items-center justify-center border border-border shadow-sm">
-                            <FileAudio className="w-8 h-8 text-accent opacity-60" />
+                            {isAnalyzing ? (
+                              <Loader2 className="w-8 h-8 text-accent animate-spin" />
+                            ) : (
+                              <FileAudio className="w-8 h-8 text-accent opacity-60" />
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <h4 className="text-sm font-bold text-text-primary truncate">{uploadedFile.name}</h4>
-                            <p className="text-[10px] text-text-tertiary font-mono uppercase mt-1">
-                              {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB • READY FOR INFERENCE
-                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <p className="text-[10px] text-text-tertiary font-mono uppercase">
+                                {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB • {isAnalyzing ? (
+                                  <span className="text-accent animate-pulse">Running Neural Audit...</span>
+                                ) : (
+                                  <>
+                                    Ready for Inference 
+                                    {speechSegments > 0 && (
+                                      <span className="text-accent ml-1">• {speechSegments} Speech Segments Identified</span>
+                                    )}
+                                  </>
+                                )}
+                              </p>
+                            </div>
+                            {isAnalyzing && (
+                              <div className="mt-2 w-full max-w-xs h-1 bg-bg border border-border rounded-full overflow-hidden">
+                                <motion.div 
+                                  className="h-full bg-accent"
+                                  initial={{ width: "0%" }}
+                                  animate={{ width: "100%" }}
+                                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                                />
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-3">
                             <button 
-                              onClick={playUploadedFile}
-                              className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${isPlayingFile ? 'bg-danger text-white shadow-lg shadow-danger/20' : 'bg-accent text-white shadow-lg shadow-accent/20 hover:brightness-110'}`}
+                              onClick={runDeepfakeAudit}
+                              disabled={isAnalyzing}
+                              className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${(isPlayingFile || isAnalyzing) ? 'bg-danger text-white shadow-lg shadow-danger/20' : 'bg-accent text-white shadow-lg shadow-accent/20 hover:brightness-110'} ${isAnalyzing ? 'opacity-80 cursor-wait' : ''}`}
                             >
-                              {isPlayingFile ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                              {isPlayingFile ? 'Stop Analysis' : 'Run Deepfake Audit'}
+                              {isAnalyzing ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : isPlayingFile ? (
+                                <Pause className="w-4 h-4" />
+                              ) : (
+                                <Play className="w-4 h-4" />
+                              )}
+                              {isAnalyzing ? 'Analyzing with AI...' : isPlayingFile ? 'Stop Analysis' : 'Run AI Security Audit'}
                             </button>
                             <button 
-                              onClick={() => { setUploadedFile(null); stopFilePlayback(); }}
+                              onClick={() => { setUploadedFile(null); stopFilePlayback(); setAiAnalysis(null); }}
                               className="p-3 text-text-tertiary hover:bg-danger/10 hover:text-danger rounded-xl transition-colors border border-transparent hover:border-danger/20"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
-                      ) : (
+
+                        <AnimatePresence>
+                          {aiAnalysis && (
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.95 }}
+                              className="mt-4 p-5 bg-card border border-accent/20 rounded-xl space-y-4 shadow-lg shadow-accent/5"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="p-1.5 rounded-lg bg-accent/10 border border-accent/20 shadow-sm">
+                                    <Bot className="w-4 h-4 text-accent" />
+                                  </div>
+                                  <h5 className="text-xs font-bold text-text-primary uppercase tracking-wider">AI Forensic Consensus</h5>
+                                </div>
+                                <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest ${
+                                  aiAnalysis.verdict === 'deepfake' ? 'bg-danger/10 text-danger border border-danger/20' : 
+                                  aiAnalysis.verdict === 'suspicious' ? 'bg-warning/10 text-warning border border-warning/20' : 
+                                  'bg-accent/10 text-accent border border-accent/20'
+                                }`}>
+                                  {aiAnalysis.verdict}
+                                </div>
+                              </div>
+                              
+                              <p className="text-xs text-text-secondary leading-relaxed font-medium">
+                                {aiAnalysis.explanation}
+                              </p>
+
+                              <div className="flex flex-wrap gap-2">
+                                {aiAnalysis.signals.map((signal: string, idx: number) => (
+                                  <span key={`${signal}-${idx}`} className="px-2 py-0.5 rounded-full bg-bg border border-border text-[9px] font-mono text-text-tertiary">
+                                    {signal}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="pt-2 flex items-center justify-between border-t border-border">
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] text-text-tertiary font-bold uppercase tracking-tighter">Certainty Score</span>
+                                  <span className={`text-lg font-black italic tracking-tighter ${aiAnalysis.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{aiAnalysis.riskScore}%</span>
+                                </div>
+                                <button 
+                                  onClick={() => setAiAnalysis(null)}
+                                  className="flex items-center gap-1.5 text-[10px] font-bold text-text-tertiary uppercase hover:text-accent transition-colors py-1 px-2 rounded-lg hover:bg-accent/5"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  Re-run Audit
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </>
+                    ) : (
                         <div className="border-2 border-dashed border-border rounded-xl p-10 flex flex-col items-center justify-center gap-4 text-center group hover:border-accent/40 transition-all cursor-pointer" onClick={() => (document.querySelector('input[type="file"]') as HTMLElement)?.click()}>
                           <div className="w-14 h-14 rounded-full bg-bg flex items-center justify-center text-text-tertiary group-hover:scale-110 transition-transform">
                              <Upload className="w-6 h-6" />
@@ -1583,8 +1996,29 @@ export default function App() {
                 exit={{ opacity: 0 }}
                 className="space-y-6"
               >
-                <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-bold tracking-tight text-text-primary">System Activity Logs</h3>
+                {!user && !isAuthLoading ? (
+                  <div className="bg-card border border-border rounded-2xl p-12 flex flex-col items-center text-center gap-6">
+                    <div className="w-20 h-20 rounded-full bg-accent/5 border border-accent/10 flex items-center justify-center mb-2">
+                       <ShieldAlert className="w-10 h-10 text-accent opacity-50" />
+                    </div>
+                    <div className="max-w-md space-y-2">
+                      <h3 className="text-xl font-bold text-text-primary uppercase tracking-tight italic">Authentication Required</h3>
+                      <p className="text-sm text-text-tertiary leading-relaxed">
+                        To view your persistent detection logs and synchronize security audits across devices, please sign in with your enterprise account.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={handleLogin}
+                      className="px-8 py-3 bg-accent text-white rounded-xl font-bold uppercase text-xs tracking-widest shadow-lg shadow-accent/20 hover:brightness-110 transition-all flex items-center gap-3"
+                    >
+                      <LogIn className="w-4 h-4" />
+                      Sign In with Google
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-8">
+                      <h3 className="text-2xl font-bold tracking-tight text-text-primary">System Activity Logs</h3>
                   <div className="flex gap-2">
                     <button 
                       onClick={exportToCSV}
@@ -1668,6 +2102,8 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+                </>
+                )}
               </motion.div>
             )}
 
@@ -2081,6 +2517,7 @@ export default function App() {
         <AnimatePresence>
           {isCallActive && riskScore > 80 && (
             <motion.div 
+              key="global-risk-alert"
               initial={{ opacity: 0, scale: 0.9, y: 50 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 50 }}
@@ -2110,8 +2547,9 @@ export default function App() {
           )}
 
           {confirmBlockId && selectedForBlock && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+            <div key="confirm-block-overlay" className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
               <motion.div 
+                key="confirm-block-backdrop"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -2119,6 +2557,7 @@ export default function App() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               />
               <motion.div 
+                key="confirm-block-modal"
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -2155,8 +2594,9 @@ export default function App() {
           )}
 
           {numberToUnverify && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+            <div key="unverify-overlay" className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
               <motion.div 
+                key="unverify-backdrop"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -2164,6 +2604,7 @@ export default function App() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               />
               <motion.div 
+                key="unverify-modal"
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -2203,8 +2644,9 @@ export default function App() {
           )}
 
           {numberToRemove && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+            <div key="remove-block-overlay" className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
               <motion.div 
+                key="remove-block-backdrop"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -2212,6 +2654,7 @@ export default function App() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               />
               <motion.div 
+                key="remove-block-modal"
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -2250,8 +2693,9 @@ export default function App() {
           )}
 
           {showClearConfirm && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
+            <div key="clear-logs-overlay" className="fixed inset-0 z-[60] flex items-center justify-center p-6 sm:p-0">
               <motion.div 
+                key="clear-logs-backdrop"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -2259,6 +2703,7 @@ export default function App() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               />
               <motion.div 
+                key="clear-logs-modal"
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -2299,6 +2744,7 @@ export default function App() {
 
           {toast && (
             <motion.div 
+              key="global-toast"
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
