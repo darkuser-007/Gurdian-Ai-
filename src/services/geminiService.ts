@@ -17,6 +17,10 @@ export interface AIAnalysisResult {
  */
 export async function analyzeAudioForDeepfake(fileBase64: string, mimeType: string): Promise<AIAnalysisResult> {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("MISSING_API_KEY: Gemini API Key is not configured. Please add it in the Settings menu.");
+    }
+
     const prompt = `
       You are a world-class Forensic Audio Engineer and Neural Biometrics Specialist. 
       Your mission is to perform a high-fidelity audit of the provided audio to detect AI-generated synthetic speech (Deepfakes).

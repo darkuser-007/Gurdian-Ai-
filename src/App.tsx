@@ -875,6 +875,8 @@ export default function App() {
       const errorMessage = err.message || "";
       if (errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("quota")) {
         setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a minute." });
+      } else if (errorMessage.includes("MISSING_API_KEY")) {
+        setToast({ message: "API Key Missing: Please provide a Gemini API Key in the Settings menu." });
       } else if (errorMessage.includes("SAFETY_BLOCKED")) {
         setToast({ message: "Analysis Blocked: Safety filters triggered. Try a different sample." });
       } else if (errorMessage.includes("PERMISSION_DENIED")) {
