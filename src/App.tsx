@@ -359,7 +359,11 @@ export default function App() {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const audioInputs = devices.filter(device => device.kind === 'audioinput');
-      setAudioDevices(audioInputs);
+      // Deduplicate by deviceId just in case, and filter out if it's already the default string
+      const uniqueInputs = audioInputs.filter((device, index, self) => 
+        device.deviceId && self.findIndex(d => d.deviceId === device.deviceId) === index
+      );
+      setAudioDevices(uniqueInputs);
     } catch (err) {
       console.warn("Unable to enumerate devices initially:", err);
     }
@@ -870,9 +874,13 @@ export default function App() {
       console.error("Audit error:", err);
       const errorMessage = err.message || "";
       if (errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("quota")) {
-        setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a moment." });
+        setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a minute." });
+      } else if (errorMessage.includes("SAFETY_BLOCKED")) {
+        setToast({ message: "Analysis Blocked: Safety filters triggered. Try a different sample." });
+      } else if (errorMessage.includes("PERMISSION_DENIED")) {
+        setToast({ message: "API Key Error: Check your Gemini API key in settings." });
       } else {
-        setToast({ message: "AI Analysis failed. Check console for details." });
+        setToast({ message: `AI Analysis failed: ${errorMessage.slice(0, 60)}...` });
       }
     } finally {
       setIsAnalyzing(false);
@@ -1613,20 +1621,20 @@ export default function App() {
                           <h4 className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary px-1">Active Indicators</h4>
                           <div className="flex flex-wrap gap-2">
                              {(isCallActive && riskScore > 75) ? (
-                               <>
+                               <React.Fragment key="scam-signals">
                                  <SignalBadge label="Phase Jitter" />
                                  <SignalBadge label="Synth Reson" />
                                  <SignalBadge label="PCM Guard" />
                                  <SignalBadge label="Gap detect" />
-                               </>
+                               </React.Fragment>
                              ) : isCallActive ? (
-                               <>
+                               <React.Fragment key="natural-signals">
                                  <SignalBadge label="Natural" />
                                  <SignalBadge label="Jitter OK" />
                                  <SignalBadge label="Airflow" />
-                               </>
+                               </React.Fragment>
                              ) : (
-                               <div className="text-[10px] font-medium text-text-tertiary italic px-1">Monitoring...</div>
+                               <div key="monitoring-state" className="text-[10px] font-medium text-text-tertiary italic px-1">Monitoring...</div>
                              )}
                           </div>
                           

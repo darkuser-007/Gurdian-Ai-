@@ -32,7 +32,7 @@ export async function analyzeAudioForDeepfake(fileBase64: string, mimeType: stri
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-3-flash-preview",
       contents: {
         parts: [
           { text: prompt },
@@ -76,6 +76,9 @@ export async function analyzeAudioForDeepfake(fileBase64: string, mimeType: stri
     const text = response.text;
     
     if (!text) {
+      if (response.candidates?.[0]?.finishReason === 'SAFETY') {
+        throw new Error("SAFETY_BLOCKED: The AI flagged the audio file as potentially harmful or violating safety guidelines.");
+      }
       throw new Error("Empty response from AI model");
     }
     
@@ -86,11 +89,15 @@ export async function analyzeAudioForDeepfake(fileBase64: string, mimeType: stri
       throw new Error("Invalid AI response format");
     }
   } catch (error: any) {
-    console.error("Gemini Audio Analysis Error:", error);
+    console.error("Gemini Audio Analysis Error Detail:", error);
     
     // Check for quota exceeded error (Common in free tier)
-    if (error?.message?.includes("quota") || error?.status === "RESOURCE_EXHAUSTED" || error?.code === 429) {
+    if (error?.message?.includes("quota") || error?.status === "RESOURCE_EXHAUSTED" || error?.code === 429 || error?.message?.includes("429")) {
       throw new Error("QUOTA_EXCEEDED: Gemini AI rate limit reached. Please wait a minute before retrying.");
+    }
+    
+    if (error?.message?.includes("PERMISSION_DENIED")) {
+      throw new Error("PERMISSION_DENIED: API Key issues. Please check your Gemini API key in settings.");
     }
     
     throw error;
