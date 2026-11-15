@@ -507,9 +507,9 @@ export default function App() {
         const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
         console.log("Voice Command Recognized:", transcript);
 
-        if (transcript.includes('start analysis') || transcript.includes('begin monitoring')) {
+        if (transcript.includes('start microphone') || transcript.includes('start preview')) {
           setIsCallActive(true);
-        } else if (transcript.includes('stop analysis') || transcript.includes('end monitoring')) {
+        } else if (transcript.includes('stop microphone') || transcript.includes('stop preview')) {
           setIsCallActive(false);
         } else if (transcript.includes('frequency mode')) {
           setVizMode('frequency');
@@ -561,21 +561,34 @@ export default function App() {
   }, [voiceControlEnabled]);
 
   const requestNotificationPermission = async () => {
-    if (!("Notification" in window)) return;
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
+    if (!("Notification" in window)) {
+      setToast({ message: "This browser does not support desktop notifications." });
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission !== "granted") {
+        setToast({ message: "Desktop notifications were not enabled." });
+      }
+    } catch {
+      setToast({ message: "Could not request desktop notification permission." });
+    }
   };
 
   const sendOSNotification = (score: number, label: string) => {
-    if (notificationPermission === 'granted') {
-      const title = `GUARDIAN ALERT: ${label} Detected`;
+    if (!("Notification" in window) || notificationPermission !== "granted") return;
+    try {
+      const title = "Guardian: " + label;
       const options = {
-        body: `Continuous monitoring identified a ${score}% risk factor on the current audio signal. Immediate action recommended.`,
-        icon: '/favicon.ico', // Fallback, could use a specific alert icon if available
-        tag: 'guardian-alert',
+        body: "Gemini screening returned a concern score of " + score + "/100 for a submitted sample. This is not proof of a deepfake; review the explanation.",
+        icon: "/favicon.ico",
+        tag: "guardian-audio-review",
         silent: false
       };
       new Notification(title, options);
+    } catch (error) {
+      console.warn("Desktop notification could not be displayed:", error);
     }
   };
 
@@ -866,6 +879,12 @@ export default function App() {
       
       setAiAnalysis(result);
       setRiskScore(result.riskScore);
+      if (result.verdict !== "authentic") {
+        sendOSNotification(
+          result.riskScore,
+          result.verdict === "deepfake" ? "High-risk sample flagged" : "Sample requires review"
+        );
+      }
       setDashboardStats(prev => ({
         ...prev,
         callsMonitored: prev.callsMonitored + 1,
@@ -1725,6 +1744,7 @@ export default function App() {
                         <div>
                           <h3 className="text-lg font-bold tracking-tight text-text-primary">Test Lab Bench</h3>
                           <p className="text-xs text-text-tertiary mt-1">Submit a recording for Gemini-assisted screening. This is not a validated forensic detector.</p>
+                          <p className="text-[10px] text-text-tertiary mt-2">Audio is sent to Guardian's server and Gemini for processing. Upload only recordings you have permission to share.</p>
                         </div>
                         <label className="cursor-pointer group">
                           <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} />
@@ -1909,14 +1929,14 @@ export default function App() {
                                   onClick={() => toggleVerify(item.id)}
                                   className={`p-2 transition-all rounded-lg border ${item.isVerified ? 'bg-accent text-white border-accent' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
                                   title={item.isVerified ? 'Trusted Label' : 'Mark as trusted reference label'}
-                                  aria-label={item.isVerified ? 'Verified voice details' : 'Mark this record as a trusted reference label'}
+                                  aria-label={item.isVerified ? 'View trusted reference label' : 'Mark this record as a trusted reference label'}
                                 >
                                   <ShieldCheck className="w-4 h-4" aria-hidden="true" />
                                 </button>
                                 <button 
                                   onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                   className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
-                                  title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
+                                  title={item.isBlocked ? 'Local blocklist label' : 'Add local blocklist label'}
                                   aria-label={item.isBlocked ? 'Blocked number details' : 'Block this number'}
                                 >
                                   <Ban className="w-4 h-4" aria-hidden="true" />
@@ -2144,8 +2164,8 @@ export default function App() {
                                  <button 
                                    onClick={() => handleBlockClick(item.id, !!item.isBlocked)}
                                    className={`p-2 transition-all rounded-lg border ${item.isBlocked ? 'bg-danger text-white border-danger' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
-                                   title={item.isBlocked ? 'Number Blocked' : 'Block Number'}
-                                   aria-label={item.isBlocked ? 'Number is blocked' : 'Block number'}
+                                   title={item.isBlocked ? 'Local blocklist label' : 'Add local blocklist label'}
+                                   aria-label={item.isBlocked ? 'Number has a local blocklist label' : 'Add a local blocklist label'}
                                  >
                                    <Ban className="w-3.5 h-3.5" aria-hidden="true" />
                                  </button>
@@ -2301,7 +2321,7 @@ export default function App() {
                           <div className="bg-bg/50 border border-border p-4 rounded-xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
                              <div className={`w-2 h-2 rounded-full ${autoBlockThreshold > 85 ? 'bg-danger' : 'bg-accent'} animate-pulse`} />
                              <p className="text-[11px] text-text-secondary font-medium leading-tight">
-                               Current configuration will automatically terminate signals with a <span className="font-bold text-text-primary">{autoBlockThreshold >= 90 ? 'Critical' : 'High'}</span> deepfake probability score.
+                               Current configuration stops sample preview playback when the screening concern score reaches <span className="font-bold text-text-primary">{autoBlockThreshold >= 90 ? 'Critical' : 'High'}</span> screening concern threshold. It does not block phone calls.
                              </p>
                           </div>
                         </motion.div>
@@ -2358,14 +2378,14 @@ export default function App() {
 
                        <div className="flex items-start justify-between gap-6">
                           <div className="space-y-1">
-                             <h4 className="text-sm font-semibold text-text-primary">Background Noise Reduction</h4>
-                             <p className="text-[11px] text-text-tertiary max-w-sm">Attempt to filter environmental noise from the live stream to isolate vocal characteristics.</p>
+                             <h4 className="text-sm font-semibold text-text-primary">Background Noise Reduction (not available)</h4>
+                             <p className="text-[11px] text-text-tertiary max-w-sm">Audio denoising is not implemented in this browser build. These controls do not alter recordings.</p>
                           </div>
                           <button 
-                             onClick={() => setNoiseReductionEnabled(!noiseReductionEnabled)}
-                             className={`w-12 h-6 rounded-full relative transition-all shrink-0 ${noiseReductionEnabled ? 'bg-accent shadow-sm' : 'bg-border'}`}
-                             aria-label="Toggle noise reduction"
-                             aria-pressed={noiseReductionEnabled}
+                             disabled title="Noise reduction is not implemented"
+                             className={`w-12 h-6 rounded-full relative transition-all shrink-0 opacity-40 cursor-not-allowed ${noiseReductionEnabled ? 'bg-accent shadow-sm' : 'bg-border'}`}
+                             aria-label="Noise reduction unavailable"
+                             aria-pressed={false}
                           >
                              <motion.div 
                                 animate={{ 
@@ -2387,12 +2407,13 @@ export default function App() {
                                 <div className="flex items-center justify-between">
                                    <div className="space-y-1">
                                       <label id="nr-intensity-label" className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">NR Intensity</label>
-                                      <p className="text-[11px] text-text-tertiary opacity-70">Control the aggressive filtering of the denoising algorithm.</p>
+                                      <p className="text-[11px] text-text-tertiary opacity-70">This control is unavailable until audio denoising is implemented.</p>
                                    </div>
                                    <div className="flex items-center gap-3">
                                       <input 
                                          type="range" min="0" max="1" step="0.1" 
-                                         value={noiseReductionIntensity} 
+                                         value={noiseReductionIntensity}
+                                         disabled
                                          onChange={(e) => setNoiseReductionIntensity(parseFloat(e.target.value))}
                                          className="w-32 h-1.5 bg-bg border border-border rounded-full appearance-none cursor-pointer accent-accent"
                                          aria-labelledby="nr-intensity-label"
@@ -2421,9 +2442,9 @@ export default function App() {
                        <div className="flex items-start justify-between gap-6">
                           <div className="space-y-1">
                              <h4 className="text-sm font-semibold text-text-primary">Voice-Activated Commands</h4>
-                             <p className="text-[11px] text-text-tertiary max-w-sm">Enable hands-free control of Guardian protocols via neural speech recognition.</p>
+                             <p className="text-[11px] text-text-tertiary max-w-sm">Use the browser's speech-recognition API to navigate the app and start or stop the microphone preview. This is separate from audio screening.</p>
                              <div className="pt-2 flex flex-wrap gap-2">
-                               {['"Start Analysis"', '"Stop Analysis"', '"Frequency Mode"', '"Open Settings"'].map(cmd => (
+                               {['"Start Microphone"', '"Stop Microphone"', '"Frequency Mode"', '"Open Settings"'].map(cmd => (
                                  <code key={cmd} className="text-[9px] bg-bg border border-border px-1.5 py-0.5 rounded text-text-tertiary font-mono">{cmd}</code>
                                ))}
                              </div>
@@ -2448,20 +2469,16 @@ export default function App() {
                     <div className="pt-10 border-t border-border space-y-6">
                        <div className="flex items-center gap-2">
                           <Bell className="w-4 h-4 text-accent" />
-                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">In-Call Alerting</label>
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Sample Review Alerts</label>
                        </div>
                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="p-4 bg-bg border border-border rounded-xl flex items-center justify-between">
-                             <span className="text-xs font-semibold text-text-secondary">Visual Signal Overlay</span>
-                             <div className="w-8 h-4 bg-accent rounded-full relative">
-                                <div className="absolute right-1 top-1 w-2 h-2 bg-white rounded-full" />
-                             </div>
+                             <span className="text-xs font-semibold text-text-secondary">High-risk result banner</span>
+                             <span className="text-[10px] font-bold uppercase tracking-wide text-accent">Enabled</span>
                           </div>
-                          <div className="p-4 bg-bg border border-border rounded-xl flex items-center justify-between opacity-50">
-                             <span className="text-xs font-semibold text-text-secondary">Haptic Feedback</span>
-                             <div className="w-8 h-4 bg-border rounded-full relative">
-                                <div className="absolute left-1 top-1 w-2 h-2 bg-white rounded-full" />
-                             </div>
+                          <div className="p-4 bg-bg border border-border rounded-xl flex items-center justify-between opacity-60">
+                             <span className="text-xs font-semibold text-text-secondary">Haptic feedback</span>
+                             <span className="text-[10px] font-bold uppercase tracking-wide text-text-tertiary">Not available</span>
                           </div>
                        </div>
                     </div>
@@ -2629,7 +2646,7 @@ export default function App() {
                   <div className="w-16 h-16 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-6">
                     <AlertTriangle className="w-8 h-8" aria-hidden="true" />
                   </div>
-                  <h3 id="block-dialog-title" className="text-xl font-bold tracking-tight text-text-primary mb-2">Block this sender?</h3>
+                  <h3 id="block-dialog-title" className="text-xl font-bold tracking-tight text-text-primary mb-2">Add local blocklist label?</h3>
                   <p className="text-xs text-text-tertiary leading-relaxed mb-8">
                     This marks the selected history record as blocked inside Guardian. It does not block calls at the phone or carrier level.
                   </p>
