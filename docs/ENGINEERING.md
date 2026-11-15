@@ -203,8 +203,8 @@ Open app
 - Review Vercel request logs and Firebase Authentication configuration.
 - Add Firebase App Check once hosting and reCAPTCHA configuration are ready.
 - Test Firestore rules using the Firebase Emulator Suite before deployment.
-- Add retention controls and an explicit privacy/consent notice for audio sent to Gemini.
-- Complete dependency remediation, including major-version upgrades that cannot be applied automatically.
+- Set retention controls and keep the browser upload consent notice visible.
+- Re-run dependency audit after each lockfile update. The safe audit fix reduced the initial 16 findings to 6 without forcing a Firebase major downgrade. The remaining report includes a Node gRPC dependency pinned by Firebase Firestore; assess it against the actual browser/WebChannel path before applying an override. Do not force a downgrade of Firebase to clear a scanner finding.
 
 ## 7. QA and test strategy
 
