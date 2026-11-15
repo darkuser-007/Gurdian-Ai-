@@ -68,7 +68,8 @@ export function validateAudioInput(audioBase64: unknown, mimeType: unknown) {
 
   const normalizedMimeType = mimeType.toLowerCase().split(";")[0].trim();
   if (mimeType.length > MAX_MIME_TYPE_LENGTH || !SUPPORTED_AUDIO_TYPES.has(normalizedMimeType)) {
-    throw new AudioAnalysisError("Unsupported audio type: " + (normalizedMimeType || "unknown") + ".", 415, "UNSUPPORTED_AUDIO_TYPE");
+    const safeMimeType = normalizedMimeType.slice(0, MAX_MIME_TYPE_LENGTH) || "unknown";
+    throw new AudioAnalysisError("Unsupported audio type: " + safeMimeType + ".", 415, "UNSUPPORTED_AUDIO_TYPE");
   }
   return { audioBase64, mimeType: normalizedMimeType };
 }
