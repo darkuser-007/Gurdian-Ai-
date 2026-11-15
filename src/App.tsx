@@ -967,6 +967,12 @@ export default function App() {
     setIsCallActive(false);
   };
 
+  const releaseMicrophoneStream = () => {
+    if (!mediaStreamRef.current) return;
+    mediaStreamRef.current.getTracks().forEach(track => track.stop());
+    mediaStreamRef.current = null;
+  };
+
   const startRecording = async () => {
     try {
       if (mediaStreamRef.current) {
@@ -1020,6 +1026,8 @@ export default function App() {
       recorder.onstop = () => {
         setIsRecording(false);
         setIsCallActive(false);
+        // Also release the microphone when the size guard stops recording automatically.
+        releaseMicrophoneStream();
 
         if (recordingTooLargeRef.current) {
           setUploadedFile(null);
@@ -1050,6 +1058,7 @@ export default function App() {
       recorder.onerror = () => {
         setIsRecording(false);
         setIsCallActive(false);
+        releaseMicrophoneStream();
         setToast({ message: "The browser could not complete the audio recording." });
       };
 
@@ -1069,10 +1078,7 @@ export default function App() {
       recorder.stop();
     }
     setIsRecording(false);
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
+    releaseMicrophoneStream();
     setIsCallActive(false);
   };
 
