@@ -69,7 +69,7 @@ Configure these Environment Variables in the Vercel project:
 - `GEMINI_MODEL` (optional; defaults to `gemini-3.8-flash`)
 - `FIREBASE_WEB_API_KEY` (optional override; otherwise read from the Firebase app config file)
 
-Redeploy after changing environment variables. Audio uploads are limited to 3 MB. Rate limiting is in-memory and per function instance; use a shared rate-limit store before scaling to high traffic.
+Redeploy after changing environment variables. Audio uploads are limited to 3 MB. Rate limiting is bounded in memory and per function instance; it is not a global quota. Use a shared rate-limit store before scaling to high traffic. The audio-review function is configured for a 60-second maximum execution window.
 
 ## Firebase rules and indexes
 
@@ -89,6 +89,10 @@ This command deploys the rules and composite history index for the database conf
 - Uploaded audio is sent to Guardian's server and Gemini for processing. Only submit recordings you have permission to share.
 - Local trusted/blocklist labels are not biometric verification or phone-level call blocking.
 - Do not use screening results as the sole basis for financial, legal, employment, or safety decisions.
+
+## Dependency audit baseline
+
+The latest reviewed lockfile has four remaining high-severity npm audit findings in the Firebase / Firestore / Node gRPC dependency chain, with zero critical, moderate, or low findings. CI fails if any critical, moderate, or low finding appears, or if the high-severity count exceeds this documented baseline. Do not force a Firebase downgrade just to silence the scanner.
 
 ## Quality checks
 
