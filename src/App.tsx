@@ -168,6 +168,7 @@ export default function App() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [confirmBlockId, setConfirmBlockId] = useState<string | null>(null);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<DetectionResult | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [autoBlockEnabled, setAutoBlockEnabled] = useState(false);
   const [autoBlockThreshold, setAutoBlockThreshold] = useState(85);
@@ -1083,29 +1084,54 @@ export default function App() {
   };
 
   const exportToCSV = () => {
-    const headers = ['Timestamp', 'Origin', 'Risk Score', 'Duration', 'Verdict'];
+    if (history.length === 0) {
+      setToast({ message: "There are no saved records to export." });
+      return;
+    }
+    const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+    const headers = ['Timestamp', 'Origin', 'Screening Concern Score', 'Duration', 'Verdict'];
     const rows = history.map(item => [
-      `"${item.timestamp.toLocaleString()}"`,
-      `"${item.phoneNumber}"`,
-      `"${item.riskScore}%"`,
-      `"${item.duration}"`,
-      `"${getVerdict(item.riskScore, item.verdict).label}"`
+      escapeCsv(item.timestamp.toLocaleString()),
+      escapeCsv(item.phoneNumber),
+      escapeCsv(`${item.riskScore}/100`),
+      escapeCsv(item.duration),
+      escapeCsv(getVerdict(item.riskScore, item.verdict).label)
     ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
+    const csvContent = [headers.map(escapeCsv).join(','), ...rows.map(row => row.join(','))].join('\\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `guardian-detection-log-${Date.now()}.csv`);
+    link.href = url;
+    link.download = `guardian-detection-log-${Date.now()}.csv`;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setToast({ message: `Exported ${history.length} saved record(s).` });
+  };
+
+  const copyAnalysisReport = async () => {
+    if (!aiAnalysis) return;
+    const report = [
+      "Guardian AI audio screening report",
+      `Created: ${new Date().toLocaleString()}`,
+      `Screening concern score: ${aiAnalysis.riskScore}/100 (not a probability)`,
+      `Screening category: ${aiAnalysis.verdict}`,
+      `Explanation: ${aiAnalysis.explanation}`,
+      "Audible observations:",
+      ...(Array.isArray(aiAnalysis.signals) ? aiAnalysis.signals.map((signal: string) => `- ${signal}`) : []),
+      "",
+      "This AI-assisted result is a screening aid, not proof that a voice is authentic or fake."
+    ].join("\\n");
+
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(report);
+      setToast({ message: "Screening report copied to clipboard." });
+    } catch {
+      setToast({ message: "Clipboard access is unavailable in this browser context." });
+    }
   };
 
   const startAudioViz = async () => {
@@ -1893,7 +1919,7 @@ export default function App() {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <h3 className="font-semibold text-lg">Detailed Detection History</h3>
-                        <button className="text-xs text-accent bg-accent/10 px-3 py-1.5 rounded-lg border border-accent/20 hover:bg-accent/20 transition-all font-bold">Export Logs</button>
+                        <button onClick={exportToCSV} className="text-xs text-accent bg-accent/10 px-3 py-1.5 rounded-lg border border-accent/20 hover:bg-accent/20 transition-all font-bold">Export Logs</button>
                         <button 
                            onClick={() => setShowClearConfirm(true)}
                            className="text-xs text-danger bg-danger/10 px-3 py-1.5 rounded-lg border border-danger/20 hover:bg-danger/20 transition-all font-bold"
@@ -1947,7 +1973,7 @@ export default function App() {
                                 >
                                   <Ban className="w-4 h-4" aria-hidden="true" />
                                 </button>
-                                <button className="p-2 transition-colors hover:bg-bg rounded-lg text-text-tertiary" aria-label="View details">
+                                <button onClick={() => setSelectedHistoryItem(item)} className="p-2 transition-colors hover:bg-bg rounded-lg text-text-tertiary" aria-label={`View details for ${item.phoneNumber}`}>
                                   <ArrowRight className="w-4 h-4" aria-hidden="true" />
                                 </button>
                               </div>
@@ -2622,10 +2648,55 @@ export default function App() {
                 </p>
                 <div className="flex gap-3">
                   <button onClick={() => setIsCallActive(false)} className="flex-1 bg-card border border-border text-danger py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-bg transition-all">Stop Preview</button>
-                  <button className="px-4 py-2.5 bg-black/20 rounded-xl text-xs font-bold uppercase tracking-wider border border-white/10 hover:bg-black/30 transition-all">Report</button>
+                  <button onClick={copyAnalysisReport} className="px-4 py-2.5 bg-black/20 rounded-xl text-xs font-bold uppercase tracking-wider border border-white/10 hover:bg-black/30 transition-all">Copy Report</button>
                 </div>
               </div>
             </motion.div>
+          )}
+
+          {selectedHistoryItem && (
+            <div key="history-details-overlay" className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <button
+                type="button"
+                aria-label="Close history details"
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-default"
+                onClick={() => setSelectedHistoryItem(null)}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 12 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="history-details-title"
+                className="relative z-10 bg-card border border-border w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 id="history-details-title" className="text-lg font-bold text-text-primary">Screening record details</h3>
+                    <p className="text-xs text-text-tertiary mt-1">{selectedHistoryItem.timestamp.toLocaleString()}</p>
+                  </div>
+                  <button type="button" onClick={() => setSelectedHistoryItem(null)} aria-label="Close details" className="p-2 rounded-lg hover:bg-bg text-text-tertiary">
+                    <XCircle className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-bg rounded-xl p-3"><p className="text-[10px] uppercase text-text-tertiary font-bold">Source</p><p className="text-sm text-text-primary mt-1 break-all">{selectedHistoryItem.phoneNumber}</p></div>
+                  <div className="bg-bg rounded-xl p-3"><p className="text-[10px] uppercase text-text-tertiary font-bold">Screening concern</p><p className="text-sm text-text-primary mt-1">{selectedHistoryItem.riskScore}/100</p></div>
+                  <div className="bg-bg rounded-xl p-3"><p className="text-[10px] uppercase text-text-tertiary font-bold">Category</p><p className="text-sm text-text-primary mt-1 capitalize">{selectedHistoryItem.verdict}</p></div>
+                  <div className="bg-bg rounded-xl p-3"><p className="text-[10px] uppercase text-text-tertiary font-bold">Duration</p><p className="text-sm text-text-primary mt-1">{selectedHistoryItem.duration}</p></div>
+                </div>
+                {selectedHistoryItem.error && <p className="text-sm text-danger">{selectedHistoryItem.error}</p>}
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-text-secondary mb-2">Recorded observations</h4>
+                  {selectedHistoryItem.signals.length > 0 ? (
+                    <ul className="space-y-2">{selectedHistoryItem.signals.map((signal, index) => <li key={`${signal}-${index}`} className="text-sm text-text-secondary flex gap-2"><span aria-hidden="true">•</span><span>{signal}</span></li>)}</ul>
+                  ) : <p className="text-sm text-text-tertiary">No observations were saved for this record.</p>}
+                </div>
+                <p className="text-xs text-text-tertiary border-t border-border pt-4">This score is an AI-assisted screening concern score, not a probability or forensic verdict. Verify important claims independently.</p>
+                <div className="flex justify-end"><button type="button" onClick={() => setSelectedHistoryItem(null)} className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-bold">Close</button></div>
+              </motion.div>
+            </div>
           )}
 
           {confirmBlockId && selectedForBlock && (
