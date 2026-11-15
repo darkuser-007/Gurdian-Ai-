@@ -143,7 +143,7 @@ The history collection contains flat records. Each record belongs to one Firebas
 | verdict | String | Yes | authentic, suspicious, deepfake, or error |
 | signals | List<String> | Yes | Model-provided observations |
 | duration | String | No | Display duration; currently -- for uploaded samples |
-| isBlocked | Boolean | No | Local history label; does not block telephony |
+| isBlocked | Boolean | No | Local history label; Android's separate caller blocklist is stored locally on-device |
 | isVerified | Boolean | No | Local trusted-reference label; not biometric verification |
 | error | String | No | Bounded error detail for failed reviews |
 
@@ -285,22 +285,24 @@ This command has not been run from this engineering session. A successful GitHub
 - Firebase Console: Auth sign-in activity, Firestore rule denials, index status and usage.
 - Gemini API console: quota, rate, and billing.
 
-## 9. Unsupported capabilities
+## 9. Platform capabilities and remaining limits
 
-- Intercepting cellular calls or reading the dialer's caller ID.
-- Automatically rejecting phone calls or adding numbers to the OS/carrier blocklist.
-- Android background/foreground telephony service.
-- AASIST/TFLite anti-spoof model inference.
-- Biometric speaker identity verification.
-- A validated probability of deepfake authenticity.
+- The browser app cannot intercept cellular calls or read the dialer's caller ID.
+- The Android companion supports Android 10+ call screening after the user grants `ROLE_CALL_SCREENING`. It rejects only exact numbers manually entered into its on-device blocklist and fails open for unknown/private numbers or local errors.
+- The Android companion receives caller metadata only. It does not capture, record, or analyze cellular call audio, and it cannot use Gemini's sample-review result to automatically reject a live call.
+- There is no deployed or benchmark-validated AASIST/TFLite anti-spoof model.
+- Biometric speaker identity verification and a calibrated probability of deepfake authenticity are unsupported.
+- Carrier-level blocking and OEM/system-privileged call-audio integration are not implemented.
 
-These require a separate Android client, a validated anti-spoofing model and benchmark dataset, and appropriate permissions and consent. They must not be implied by the current web app.
+Live-call deepfake detection would require a validated anti-spoofing model and a legitimate, supported source of call audio. The standard Android call-screening service used here does not provide that audio. These limits must not be obscured by the product UI.
 
 ## 10. Next recommended tasks
 
-1. Complete dependency remediation, including major-version upgrades that cannot be applied automatically.
-2. Deploy Firestore rules and composite index to the intended Firebase named database.
-3. Smoke-test sign-in, token validation, live Vercel API, Gemini request, and Firestore history using real environment secrets.
-4. Replace per-instance rate limiting with a shared limiter.
+1. Confirm that the Firebase project and named Firestore database in `firebase-applet-config.json` belong to this app, then deploy rules and the composite history index to that verified database.
+2. Smoke-test Google sign-in, ID-token validation, Vercel API, Gemini request, and Firestore history using real secrets and an authorized test account.
+3. Replace per-instance API rate limiting with a shared limiter and add Firebase App Check verification before exposing paid Gemini calls at meaningful scale.
+4. Complete Android device tests on API 29+ (approved role, exact match blocked, unknown/private calls allowed, system call-history behavior).
+5. Evaluate and deploy a validated anti-spoofing model against a representative benchmark before describing the product as a deepfake detector.
+6. Reassess the four remaining high-severity dependency findings after upstream Firebase releases.
 5. Select a validated anti-spoofing model and evaluation dataset; add ROC/DET, false-accept, and false-reject reporting before presenting a detector claim.
 6. Add browser end-to-end tests for sign-in, upload, recording, error states, and history actions.
