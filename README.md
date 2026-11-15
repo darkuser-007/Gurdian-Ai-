@@ -14,9 +14,23 @@ Guardian AI is a browser-based audio review tool. It can capture microphone audi
 ## Important product limitations
 
 - Gemini's result is a screening aid, not a validated anti-spoofing classifier, forensic certification, or proof that a voice is authentic or fake.
-- A browser microphone cannot intercept cellular calls, obtain phone numbers from the dialer, reject calls, or run as an Android foreground service.
-- The repository does not currently contain the Android telephony client or a deployed AASIST classifier. Do not present those capabilities as active.
+- The browser app cannot intercept cellular calls, obtain caller IDs from the dialer, or reject calls.
+- The repository includes a separate Android 10+ companion. After the user grants Android's call-screening role, it rejects only exact matches in the user's local blocklist; it does not inspect call audio or use AI to block calls.
+- There is no deployed or benchmark-validated AASIST/TFLite anti-spoofing model. Do not present live-call deepfake detection as an active capability.
 - Consequential decisions should be independently verified.
+
+## Android companion
+
+The `android/` project is a native caller-blocklist companion for Android 10 (API 29) and newer. Install it, tap **Enable Android call screening**, and approve the system role prompt. Add exact phone-number matches to the local blocklist. Unknown, private, malformed, and unlisted numbers are allowed.
+
+Build locally with JDK 17, Android SDK Platform 35, and Gradle 8.9:
+
+```bash
+cd android
+gradle testDebugUnitTest assembleDebug --no-daemon
+```
+
+The Android CI workflow runs unit tests and builds a debug APK artifact. The companion uses Android `CallScreeningService` only for caller metadata. It cannot access cellular call audio, so it cannot detect a synthetic voice during a live call. The existing web app remains responsible for user-submitted audio screening.
 
 ## Local development
 
@@ -87,7 +101,7 @@ This command deploys the rules and composite history index for the database conf
 - The Gemini API key is server-only.
 - Audio review requires a valid Firebase ID token; anonymous requests are rejected.
 - Uploaded audio is sent to Guardian's server and Gemini for processing. Only submit recordings you have permission to share.
-- Local trusted/blocklist labels are not biometric verification or phone-level call blocking.
+- Web-app trusted and blocklist labels are not biometric verification or phone-level call blocking. The Android companion's separate local list can reject exact caller-ID matches only after the user grants the system role.
 - Do not use screening results as the sole basis for financial, legal, employment, or safety decisions.
 
 ## Dependency audit baseline
@@ -99,3 +113,4 @@ The latest reviewed lockfile has four remaining high-severity npm audit findings
 - `npm run lint`: TypeScript validation.
 - `npm test`: audio-input and Firebase-auth validation tests.
 - `npm run build`: frontend production build.
+- Android CI: `gradle testDebugUnitTest assembleDebug --no-daemon` from `android/`; the debug APK is uploaded as a workflow artifact.
