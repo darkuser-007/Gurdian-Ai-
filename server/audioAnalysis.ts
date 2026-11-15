@@ -79,7 +79,7 @@ export async function analyzeAudioForDeepfake(
 
   try {
     const ai = getAiClient();
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
     const prompt = [
       "Review the supplied audio for characteristics that may be consistent with synthetic or manipulated speech.",
       "",
