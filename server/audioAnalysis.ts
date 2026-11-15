@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;
+const MAX_AUDIO_BASE64_LENGTH = Math.ceil(MAX_AUDIO_BYTES / 3) * 4;
+const MAX_MIME_TYPE_LENGTH = 128;
 const SUPPORTED_AUDIO_TYPES = new Set([
   "audio/aac", "audio/aiff", "audio/flac", "audio/m4a", "audio/mp3",
   "audio/mp4", "audio/mpeg", "audio/mpga", "audio/ogg", "audio/opus",
@@ -45,6 +47,10 @@ export function validateAudioInput(audioBase64: unknown, mimeType: unknown) {
   if (typeof audioBase64 !== "string" || audioBase64.length === 0) {
     throw new AudioAnalysisError("Audio data is required.", 400, "INVALID_AUDIO");
   }
+  // Reject oversized encoded input before allocating a decoded Buffer.
+  if (audioBase64.length > MAX_AUDIO_BASE64_LENGTH) {
+    throw new AudioAnalysisError("Audio files must be 3 MB or smaller. Trim the recording and try again.", 413, "FILE_TOO_LARGE");
+  }
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(audioBase64)) {
     throw new AudioAnalysisError("Audio data must be valid base64.", 400, "INVALID_AUDIO");
   }
@@ -61,7 +67,7 @@ export function validateAudioInput(audioBase64: unknown, mimeType: unknown) {
   }
 
   const normalizedMimeType = mimeType.toLowerCase().split(";")[0].trim();
-  if (!SUPPORTED_AUDIO_TYPES.has(normalizedMimeType)) {
+  if (mimeType.length > MAX_MIME_TYPE_LENGTH || !SUPPORTED_AUDIO_TYPES.has(normalizedMimeType)) {
     throw new AudioAnalysisError("Unsupported audio type: " + (normalizedMimeType || "unknown") + ".", 415, "UNSUPPORTED_AUDIO_TYPE");
   }
   return { audioBase64, mimeType: normalizedMimeType };
