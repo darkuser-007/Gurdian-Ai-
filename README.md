@@ -71,12 +71,23 @@ Configure these Environment Variables in the Vercel project:
 
 Redeploy after changing environment variables. Audio uploads are limited to 3 MB. Rate limiting is in-memory and per function instance; use a shared rate-limit store before scaling to high traffic.
 
+## Firebase rules and indexes
+
+The repository includes `firebase.json`, `firestore.rules`, and `firestore.indexes.json`. Confirm in Firebase Console that `tutorsync-app` and the configured named database are the intended production resources before deploying.
+
+~~~bash
+npx firebase-tools login
+npx firebase-tools deploy --project tutorsync-app --only firestore
+~~~
+
+This command deploys the rules and composite history index for the database configured in `firebase.json`. A successful Vercel build does not deploy Firestore resources. See [docs/ENGINEERING.md](docs/ENGINEERING.md) for the full data model and operating notes.
+
 ## Security and data
 
 - The Gemini API key is server-only.
 - Audio review requires a valid Firebase ID token; anonymous requests are rejected.
-- Firestore access is governed by `firestore.rules`; deploy the rules to the Firebase project used by this app.
-- Uploaded audio is sent to the configured application backend and Gemini for processing. Obtain appropriate consent before uploading sensitive recordings.
+- Uploaded audio is sent to Guardian's server and Gemini for processing. Only submit recordings you have permission to share.
+- Local trusted/blocklist labels are not biometric verification or phone-level call blocking.
 - Do not use screening results as the sole basis for financial, legal, employment, or safety decisions.
 
 ## Quality checks
