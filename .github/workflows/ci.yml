@@ -69,12 +69,40 @@ jobs:
         run: npm pkg set name=guardian-ai-deepfake-voice-shield version=1.0.0 'engines.node=>=20.0.0'
       - name: Remove unused direct dependencies
         run: npm uninstall @google/generative-ai ws
+      - name: Apply scoped dependency security overrides
+        run: |
+          npm pkg set 'overrides.qs=^6.17.1' 'overrides.tsx.esbuild=^0.28.2'
+          npm install --package-lock-only --ignore-scripts
       - name: Apply semver-compatible security fixes
         run: |
           set +e
           npm audit fix
           audit_exit=$?
           set -e
+
+          # Reconcile and install the exact resulting lockfile before committing.
+          npm install --package-lock-only --ignore-scripts
+          npm ci
+
+          npm audit --json > npm-audit-final.json || true
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const report = JSON.parse(fs.readFileSync("npm-audit-final.json", "utf8"));
+          console.log("Post-fix dependency vulnerability totals:", report.metadata?.vulnerabilities ?? "unavailable");
+          for (const [name, item] of Object.entries(report.vulnerabilities ?? {})) {
+            console.log(JSON.stringify({
+              name,
+              severity: item.severity,
+              direct: item.isDirect,
+              range: item.range,
+              fixAvailable: item.fixAvailable
+            }));
+          }
+          NODE
+
+          npm run lint
+          npm test
+          npm run build
 
           if ! git diff --quiet -- package.json package-lock.json; then
             git config user.name "github-actions[bot]"
@@ -86,9 +114,9 @@ jobs:
             git rebase origin/main
             git push origin HEAD:main
           else
-            echo "No semver-compatible dependency changes were required."
+            echo "Dependency manifest and lockfile are already current."
           fi
 
           if [ "$audit_exit" -ne 0 ]; then
-            echo "Some advisories may require a manual major-version upgrade."
+            echo "Some advisories remain because they require a breaking major upgrade or a vendor dependency change."
           fi
