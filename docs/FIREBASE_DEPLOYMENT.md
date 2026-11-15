@@ -16,7 +16,18 @@ gcloud firestore databases describe ai-studio-fd3caff6-b7f7-4567-a716-bbb4cb0f70
 
 The configured database ID must appear exactly. Do not create a replacement database with a guessed ID or region. A missing database is a stop condition: choose its edition, location, and deletion-protection settings deliberately before creating it.
 
-## 2. Configure keyless GitHub authentication (recommended)
+## 2. Verify Google Authentication separately
+
+The web app uses `signInWithPopup` and `GoogleAuthProvider`. In Firebase Console for `tutorsync-app`:
+
+1. Open **Authentication → Sign-in method** and confirm **Google** is enabled with a support email.
+2. Open **Authentication → Settings → Authorized domains** and add the exact production hostname shown by the Vercel deployment (hostname only; do not include `https://` or a path).
+3. Keep `localhost` only if you need local development. Firebase no longer automatically authorizes localhost for projects created after April 28, 2025.
+4. Test Google sign-in from the deployed Vercel site.
+
+This workflow intentionally does not change Authentication provider settings. Confirm these settings separately before treating sign-in as production-ready.
+
+## 3. Configure keyless GitHub authentication (recommended)
 
 Use Google Cloud Shell or a workstation with the Google Cloud CLI authenticated as a project IAM administrator. This uses Workload Identity Federation instead of storing a long-lived service-account private key in GitHub.
 
@@ -77,7 +88,7 @@ echo "GCP_SERVICE_ACCOUNT=$SERVICE_ACCOUNT"
 
 The Google Cloud project administrator must approve the IAM and Workload Identity changes above. Do not grant the deployer Owner or Editor.
 
-## 3. Add GitHub repository variables
+## 4. Add GitHub repository variables
 
 In GitHub, open **Settings → Secrets and variables → Actions → Variables** for this repository and add these two repository variables (not secrets):
 
@@ -86,7 +97,7 @@ In GitHub, open **Settings → Secrets and variables → Actions → Variables**
 
 No service-account JSON key is needed.
 
-## 4. Run the deployment
+## 5. Run the deployment
 
 Open **Actions → Guardian AI Firebase Firestore Deployment → Run workflow**, select branch `main`, and enter exactly:
 
