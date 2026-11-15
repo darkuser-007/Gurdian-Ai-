@@ -1,12 +1,11 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global safety net
+    // Deny every collection unless it is explicitly opened below.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
@@ -19,40 +18,44 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    /**
-     * Validation for DetectionResult
-     */
     function isValidDetectionResult(data) {
-      return data.keys().hasAll(['timestamp', 'phoneNumber', 'riskScore', 'verdict', 'signals', 'ownerId'])
+      return data.keys().hasAll([
+          'timestamp', 'phoneNumber', 'riskScore', 'verdict', 'signals', 'ownerId'
+        ])
+        && data.keys().hasOnly([
+          'timestamp', 'phoneNumber', 'riskScore', 'verdict', 'signals',
+          'ownerId', 'duration', 'isBlocked', 'isVerified', 'error'
+        ])
         && data.timestamp is timestamp
-        && data.phoneNumber is string && data.phoneNumber.size() <= 64
-        && data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100
+        && data.phoneNumber is string
+        && data.phoneNumber.size() <= 64
+        && data.riskScore is number
+        && data.riskScore >= 0
+        && data.riskScore <= 100
         && data.verdict in ['authentic', 'suspicious', 'deepfake', 'error']
         && data.signals is list
         && data.signals.size() <= 50
         && data.ownerId == request.auth.uid
         && (data.get('duration', '--') is string)
+        && (data.get('duration', '--').size() <= 32)
         && (data.get('isBlocked', false) is bool)
-        && (data.get('isVerified', false) is bool);
+        && (data.get('isVerified', false) is bool)
+        && (!('error' in data) || (data.error is string && data.error.size() <= 500));
     }
 
     match /history/{historyId} {
-      // Create: user must be signed in and data must be valid
-      allow create: if isSignedIn() 
-        && isValidId(historyId) 
+      allow create: if isSignedIn()
+        && isValidId(historyId)
         && isValidDetectionResult(request.resource.data);
-      
-      // Read: user must be the owner of the document
-      // Note: allow list is also covered here because we check resource.data.ownerId
+
+      // Queries must constrain ownerId to the authenticated user's UID.
       allow read: if isSignedIn() && isOwner(resource.data.ownerId);
-      
-      // Update: user must be owner and data must remain valid
-      allow update: if isSignedIn() 
+
+      allow update: if isSignedIn()
         && isOwner(resource.data.ownerId)
         && isValidDetectionResult(request.resource.data)
-        && request.resource.data.ownerId == resource.data.ownerId; // ownerId is immutable
-        
-      // Delete: user must be owner
+        && request.resource.data.ownerId == resource.data.ownerId;
+
       allow delete: if isSignedIn() && isOwner(resource.data.ownerId);
     }
   }
