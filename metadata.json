@@ -1,6 +1,10 @@
 {
   "name": "Guardian AI: Deepfake Voice Shield",
-  "description": "Real-time AI-powered protection against voice deepfakes and fraudulent calls. Monitors audio streams to detect synthetic patterns and alerts users of potential risks.",
+  "description": "Browser-based audio review for user-uploaded or user-recorded samples. Provides Gemini-assisted synthetic-speech screening with clear limitations; it does not intercept cellular calls or verify a speaker's identity.",
   "requestFramePermissions": ["microphone"],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "User-initiated browser microphone recording and audio upload",
+    "Firebase Google sign-in and user-owned Firestore history",
+    "Server-side Gemini-assisted audio screening with cautious result explanations"
+  ]
 }
