@@ -12,7 +12,11 @@ class GuardianCallScreeningService : CallScreeningService() {
         val shouldReject = try {
             val incoming = callDetails.callDirection == Call.Details.DIRECTION_INCOMING
             val phoneNumber = callDetails.handle?.schemeSpecificPart
-            incoming && BlocklistStore.isBlocked(this, phoneNumber)
+            CallScreeningPolicy.shouldReject(
+                isIncomingCall = incoming,
+                incomingNumber = phoneNumber,
+                blockedNumbers = BlocklistStore.getBlockedNumbers(this)
+            )
         } catch (_: Exception) {
             // Fail open: a local metadata/storage error must not reject a call.
             false
