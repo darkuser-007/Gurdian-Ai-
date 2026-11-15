@@ -126,7 +126,7 @@ The example is illustrative only; it is not an actual model result.
 
 ### Rate-limit caveat
 
-The current guard allows up to 8 requests per minute per Firebase UID per function instance. Serverless instances do not share memory, so this is not a globally consistent quota. Before high-traffic launch, replace it with a shared store such as Redis/Upstash or a carefully bounded transactional Firestore counter.
+The current guard allows up to 8 requests per minute per Firebase UID per function instance. Its in-memory key table is capped at 10,000 entries and evicts the oldest active key under capacity pressure; this is a bounded abuse guard, not a globally consistent quota. Serverless instances do not share memory, and high-cardinality traffic can weaken per-user protection. Before high-traffic launch, replace it with a shared store such as Redis/Upstash and add platform-level spend quotas.
 
 ## 4. Database design
 
@@ -204,7 +204,7 @@ Open app
 - Add Firebase App Check once hosting and reCAPTCHA configuration are ready.
 - Test Firestore rules using the Firebase Emulator Suite before deployment.
 - Set retention controls and keep the browser upload consent notice visible.
-- Re-run dependency audit after each lockfile update. The safe audit fix reduced the initial 16 findings to 6 without forcing a Firebase major downgrade. The remaining report includes a Node gRPC dependency pinned by Firebase Firestore; assess it against the actual browser/WebChannel path before applying an override. Do not force a downgrade of Firebase to clear a scanner finding.
+- Re-run dependency audit after each lockfile update. The safe dependency updates reduced the initial 16 findings to 4 high-severity findings (zero critical, moderate, or low). The remaining report is in the Firebase / Firestore / Node gRPC dependency chain; assess it against the actual browser/WebChannel path before applying an override. Do not force a Firebase downgrade to clear a scanner finding. CI enforces this reviewed baseline and fails on any critical, moderate, or low finding, or if the high count rises above four.
 
 ## 7. QA and test strategy
 
