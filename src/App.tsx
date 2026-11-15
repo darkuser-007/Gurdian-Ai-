@@ -304,7 +304,7 @@ export default function App() {
           riskScore: data.riskScore,
           verdict: data.verdict,
           duration: data.duration,
-          signals: data.signals,
+          signals: Array.isArray(data.signals) ? data.signals.filter((signal: unknown): signal is string => typeof signal === 'string').slice(0, 50) : [],
           isBlocked: data.isBlocked,
           isVerified: data.isVerified
         });
