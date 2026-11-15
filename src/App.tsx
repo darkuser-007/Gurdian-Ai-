@@ -186,6 +186,10 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [blockedNumbers, setBlockedNumbers] = useState<string[]>([]);
   const [verifiedNumbers, setVerifiedNumbers] = useState<string[]>([]);
+  const verifiedNumberInputRef = useRef<HTMLInputElement>(null);
+  const blockedNumberInputRef = useRef<HTMLInputElement>(null);
+  const recordedBytesRef = useRef(0);
+  const recordingTooLargeRef = useRef(false);
   const [numberToRemove, setNumberToRemove] = useState<string | null>(null);
   const [numberToUnverify, setNumberToUnverify] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -644,6 +648,45 @@ export default function App() {
     }
   };
 
+  const normalizePhoneNumber = (value: string): string | null => {
+    const normalized = value.trim().replace(/[\\s().-]/g, "");
+    return /^\\+?\\d{5,15}$/.test(normalized) ? normalized : null;
+  };
+
+  const addTrustedReferenceNumber = () => {
+    const input = verifiedNumberInputRef.current;
+    const value = input?.value || "";
+    const number = normalizePhoneNumber(value);
+    if (!number) {
+      setToast({ message: "Enter a valid phone number (5–15 digits, optional leading +)." });
+      return;
+    }
+    if (verifiedNumbers.includes(number)) {
+      setToast({ message: "That trusted reference label already exists." });
+      return;
+    }
+    setVerifiedNumbers(prev => [...prev, number]);
+    setBlockedNumbers(prev => prev.filter(item => item !== number));
+    if (input) input.value = "";
+  };
+
+  const addBlockedReferenceNumber = () => {
+    const input = blockedNumberInputRef.current;
+    const value = input?.value || "";
+    const number = normalizePhoneNumber(value);
+    if (!number) {
+      setToast({ message: "Enter a valid phone number (5–15 digits, optional leading +)." });
+      return;
+    }
+    if (blockedNumbers.includes(number)) {
+      setToast({ message: "That local blocklist label already exists." });
+      return;
+    }
+    setBlockedNumbers(prev => [...prev, number]);
+    setVerifiedNumbers(prev => prev.filter(item => item !== number));
+    if (input) input.value = "";
+  };
+
   const clearAllHistory = async () => {
     if (!user) {
       setToast({ message: "Sign in to clear saved cloud history." });
@@ -924,36 +967,94 @@ export default function App() {
         if (!isCallActive) setIsCallActive(true);
       }
 
-      const recorder = new MediaRecorder(mediaStreamRef.current);
+      const supportedMimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/mp4",
+        "audio/webm",
+        "audio/ogg;codecs=opus"
+      ];
+      const preferredMimeType = supportedMimeTypes.find(type =>
+        typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(type)
+      );
+      const recorder = preferredMimeType
+        ? new MediaRecorder(mediaStreamRef.current, { mimeType: preferredMimeType })
+        : new MediaRecorder(mediaStreamRef.current);
+
       mediaRecorderRef.current = recorder;
       recordedChunksRef.current = [];
+      recordedBytesRef.current = 0;
+      recordingTooLargeRef.current = false;
+      setUploadedFile(null);
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
+        if (e.data.size === 0) return;
+        recordedBytesRef.current += e.data.size;
+        if (recordedBytesRef.current > 3 * 1024 * 1024) {
+          recordingTooLargeRef.current = true;
+          setToast({ message: "Recording reached the 3 MB upload limit and was stopped." });
+          if (recorder.state === "recording") recorder.stop();
+          return;
         }
+        recordedChunksRef.current.push(e.data);
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-        const file = new File([blob], `capture-${Date.now()}.webm`, { type: 'audio/webm' });
+        setIsRecording(false);
+        setIsCallActive(false);
+
+        if (recordingTooLargeRef.current) {
+          setUploadedFile(null);
+          recordedChunksRef.current = [];
+          setToast({ message: "Recording was too large. Record a shorter sample (3 MB maximum)." });
+          return;
+        }
+
+        const mimeType = recorder.mimeType || recordedChunksRef.current.find(chunk => chunk.type)?.type || "audio/webm";
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+        if (blob.size === 0) {
+          setUploadedFile(null);
+          setToast({ message: "No audio data was captured. Check your microphone and try again." });
+          return;
+        }
+        if (blob.size > 3 * 1024 * 1024) {
+          setUploadedFile(null);
+          setToast({ message: "Recording was too large. Record a shorter sample (3 MB maximum)." });
+          return;
+        }
+
+        const extension = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : mimeType.includes("wav") ? "wav" : "webm";
+        const file = new File([blob], `capture-${Date.now()}.${extension}`, { type: mimeType });
         setUploadedFile(file);
-        setToast({ message: "Capture complete. Ready for neural audit." });
+        setToast({ message: "Capture complete. Sign in and submit the sample for Gemini screening." });
       };
 
-      recorder.start();
+      recorder.onerror = () => {
+        setIsRecording(false);
+        setIsCallActive(false);
+        setToast({ message: "The browser could not complete the audio recording." });
+      };
+
+      recorder.start(1000);
       setIsRecording(true);
       setSpeechSegments(0);
     } catch (err) {
       console.error("Recording error:", err);
+      setPermissionError("Microphone recording could not start. Check browser permission and device availability.");
+      setToast({ message: "Could not start recording. Check your microphone permission." });
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      recorder.stop();
     }
     setIsRecording(false);
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsCallActive(false);
   };
 
   const exportToCSV = () => {
@@ -2374,22 +2475,20 @@ export default function App() {
                        <div className="space-y-4">
                           <p className="text-[11px] text-text-tertiary max-w-sm">These labels are saved in this browser only. They do not perform biometric verification or suppress an audio review.</p>
                           <div className="flex gap-2">
-                             <input 
-                               type="text"
-                               placeholder="Add trusted number..."
+                             <input
+                               ref={verifiedNumberInputRef}
+                               type="tel"
+                               inputMode="tel"
+                               placeholder="Add trusted reference number..."
                                className="flex-1 bg-card border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-accent text-text-primary"
                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                     const val = e.currentTarget.value;
-                                     if (val && !verifiedNumbers.includes(val)) {
-                                        setVerifiedNumbers([...verifiedNumbers, val]);
-                                        setBlockedNumbers(prev => prev.filter(n => n !== val));
-                                        e.currentTarget.value = '';
-                                     }
+                                  if (e.key === "Enter") {
+                                     e.preventDefault();
+                                     addTrustedReferenceNumber();
                                   }
                                }}
                              />
-                             <button className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
+                             <button type="button" onClick={addTrustedReferenceNumber} aria-label="Add trusted reference number" className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
                                 <Plus className="w-5 h-5" />
                              </button>
                           </div>
@@ -2410,7 +2509,7 @@ export default function App() {
                              ))}
                              {verifiedNumbers.length === 0 && (
                                 <div className="text-center py-6 bg-bg/30 border border-dashed border-border rounded-xl">
-                                   <p className="text-[10px] text-text-tertiary font-bold uppercase tracking-widest">No verified fingerprints enrolled</p>
+                                   <p className="text-[10px] text-text-tertiary font-bold uppercase tracking-widest">No trusted reference labels added</p>
                                 </div>
                              )}
                           </div>
@@ -2425,21 +2524,20 @@ export default function App() {
                        </div>
                        <div className="space-y-4">
                           <div className="flex gap-2">
-                             <input 
-                               type="text"
-                               placeholder="Enter phone number..."
+                             <input
+                               ref={blockedNumberInputRef}
+                               type="tel"
+                               inputMode="tel"
+                               placeholder="Add local blocklist number..."
                                className="flex-1 bg-card border border-border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-accent text-text-primary"
                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                     const val = e.currentTarget.value;
-                                     if (val && !blockedNumbers.includes(val)) {
-                                        setBlockedNumbers([...blockedNumbers, val]);
-                                        e.currentTarget.value = '';
-                                     }
+                                  if (e.key === "Enter") {
+                                     e.preventDefault();
+                                     addBlockedReferenceNumber();
                                   }
                                }}
                              />
-                             <button className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
+                             <button type="button" onClick={addBlockedReferenceNumber} aria-label="Add local blocklist number" className="p-2.5 bg-accent text-white rounded-xl hover:brightness-110 transition-all">
                                 <Plus className="w-5 h-5" />
                              </button>
                           </div>
