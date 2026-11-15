@@ -783,9 +783,13 @@ export default function App() {
 
   const runDeepfakeAudit = async () => {
     if (!uploadedFile || isAnalyzing) return;
+    if (!user) {
+      setToast({ message: "Sign in with Google before reviewing audio." });
+      return;
+    }
 
     if (speechSegments === 0 && uploadedFile.name.includes('capture-')) {
-      setToast({ message: "Forensic Warning: No neural speech activity identified. Accuracy may be degraded." });
+      setToast({ message: "No speech activity was detected in this recording. The audio review may be less informative." });
     }
 
     if (uploadedFile.size > 3 * 1024 * 1024) {
@@ -876,8 +880,10 @@ export default function App() {
 
       if (errorMessage.includes("QUOTA_EXCEEDED") || errorMessage.includes("quota")) {
         setToast({ message: "Gemini Quota Exceeded. The free tier has limits. Please wait a minute." });
+      } else if (errorMessage.includes("SIGN_IN_REQUIRED")) {
+        setToast({ message: "Please sign in with Google again to review this recording." });
       } else if (errorMessage.includes("MISSING_API_KEY")) {
-        setToast({ message: "API Key Missing: Please provide a Gemini API Key in the Settings menu." });
+        setToast({ message: "Server Gemini configuration is missing. Contact the application administrator." });
       } else if (errorMessage.includes("SAFETY_BLOCKED")) {
         setToast({ message: "Analysis Blocked: Safety filters triggered. Try a different sample." });
       } else if (errorMessage.includes("PERMISSION_DENIED")) {
@@ -1643,7 +1649,7 @@ export default function App() {
                             <div className="flex items-center gap-2 mt-1">
                               <p className="text-[10px] text-text-tertiary font-mono uppercase">
                                 {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB • {isAnalyzing ? (
-                                  <span className="text-accent animate-pulse">Running Neural Audit...</span>
+                                  <span className="text-accent animate-pulse">Running audio review...</span>
                                 ) : (
                                   <>
                                     Ready for Inference 
@@ -1667,8 +1673,8 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-3">
                             <button 
-                              onClick={runDeepfakeAudit}
-                              disabled={isAnalyzing}
+                              onClick={() => user ? runDeepfakeAudit() : handleLogin()}
+                              disabled={isAnalyzing || isAuthLoading}
                               className={`flex items-center gap-2 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${(isPlayingFile || isAnalyzing) ? 'bg-danger text-white shadow-lg shadow-danger/20' : 'bg-accent text-white shadow-lg shadow-accent/20 hover:brightness-110'} ${isAnalyzing ? 'opacity-80 cursor-wait' : ''}`}
                             >
                               {isAnalyzing ? (
@@ -1678,7 +1684,7 @@ export default function App() {
                               ) : (
                                 <Play className="w-4 h-4" />
                               )}
-                              {isAnalyzing ? 'Analyzing with AI...' : isPlayingFile ? 'Stop Analysis' : 'Run AI Security Audit'}
+                              {isAnalyzing ? 'Reviewing with AI...' : !user ? 'Sign In to Analyze' : isPlayingFile ? 'Stop Preview' : 'Run Audio Review'}
                             </button>
                             <button 
                               onClick={() => { setUploadedFile(null); stopFilePlayback(); setAiAnalysis(null); }}
@@ -1702,7 +1708,7 @@ export default function App() {
                                   <div className="p-1.5 rounded-lg bg-accent/10 border border-accent/20 shadow-sm">
                                     <Bot className="w-4 h-4 text-accent" />
                                   </div>
-                                  <h5 className="text-xs font-bold text-text-primary uppercase tracking-wider">AI Forensic Consensus</h5>
+                                  <h5 className="text-xs font-bold text-text-primary uppercase tracking-wider">Gemini audio screening result</h5>
                                 </div>
                                 <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-widest ${
                                   aiAnalysis.verdict === 'deepfake' ? 'bg-danger/10 text-danger border border-danger/20' : 
@@ -1727,8 +1733,9 @@ export default function App() {
 
                               <div className="pt-2 flex items-center justify-between border-t border-border">
                                 <div className="flex flex-col">
-                                  <span className="text-[10px] text-text-tertiary font-bold uppercase tracking-tighter">Certainty Score</span>
-                                  <span className={`text-lg font-black italic tracking-tighter ${aiAnalysis.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{aiAnalysis.riskScore}%</span>
+                                  <span className="text-[10px] text-text-tertiary font-bold uppercase tracking-tighter">Screening Concern Score</span>
+                                  <span className={`text-lg font-black italic tracking-tighter ${aiAnalysis.riskScore > 75 ? 'text-danger' : 'text-accent'}`}>{aiAnalysis.riskScore}/100</span>
+                                  <span className="text-[9px] text-text-tertiary max-w-sm mt-1">Not a probability or proof. Use independent verification for important decisions.</span>
                                 </div>
                                 <button 
                                   onClick={() => setAiAnalysis(null)}
@@ -2027,7 +2034,7 @@ export default function App() {
                              </td>
                              <td className="px-6 py-5 text-xs text-text-secondary font-medium">{item.duration}</td>
                              <td className="px-6 py-5">
-                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${getVerdict(item.riskScore).bg} ${getVerdict(item.riskScore).color}`}>
+                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${getVerdict(item.riskScore, item.verdict).bg} ${getVerdict(item.riskScore, item.verdict).color}`}>
                                   {getVerdict(item.riskScore, item.verdict).label}
                                 </span>
                              </td>
