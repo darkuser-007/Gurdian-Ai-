@@ -91,11 +91,13 @@ import {
   onSnapshot, 
   addDoc, 
   serverTimestamp, 
-  deleteDoc, 
-  doc, 
+  deleteDoc,
+  doc,
   updateDoc,
   Timestamp,
-  getDocFromServer
+  getDocFromServer,
+  getDocs,
+  writeBatch
 } from 'firebase/firestore';
 
 // --- Types ---
@@ -411,9 +413,7 @@ export default function App() {
   const [dashboardStats, setDashboardStats] = useState({
     callsMonitored: 0,
     syntheticDetected: 0,
-    accuracyRate: 0,
-    meanLatency: 0,
-    snr: 48
+    meanLatency: 0
   });
   const [riskScore, setRiskScore] = useState(0);
   const [history, setHistory] = useState<DetectionResult[]>([]);
@@ -644,6 +644,26 @@ export default function App() {
     }
   };
 
+  const clearAllHistory = async () => {
+    if (!user) {
+      setToast({ message: "Sign in to clear saved cloud history." });
+      return;
+    }
+    try {
+      const historyQuery = query(collection(db, "history"), where("ownerId", "==", user.uid));
+      const snapshot = await getDocs(historyQuery);
+      for (let start = 0; start < snapshot.docs.length; start += 450) {
+        const batch = writeBatch(db);
+        snapshot.docs.slice(start, start + 450).forEach(historyDoc => batch.delete(historyDoc.ref));
+        await batch.commit();
+      }
+      setShowClearConfirm(false);
+      setToast({ message: "Saved detection history cleared." });
+    } catch (error) {
+      handleFirestoreError(error, "delete", "history");
+    }
+  };
+
   const resetSettings = () => {
     setAutoBlockEnabled(false);
     setAutoBlockThreshold(85);
@@ -675,11 +695,11 @@ export default function App() {
   }, [history]);
 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([
-    { id: '1', title: 'Phone State Observer', description: 'Monitoring OFFHOOK signal', status: 'idle', icon: <Phone /> },
-    { id: '2', title: 'Guardian Service', description: 'Foreground capture process', status: 'idle', icon: <Server /> },
-    { id: '3', title: 'PCM Capture Loop', description: '16kHz mono sampling', status: 'idle', icon: <Mic /> },
-    { id: '4', title: 'Deepfake Detector', description: 'AASIST Model Inference', status: 'idle', icon: <Cpu /> },
-    { id: '5', title: 'Real-time Alert', description: 'Risk threshold evaluation', status: 'idle', icon: <Zap /> },
+    { id: '1', title: 'Microphone Permission', description: 'User-granted browser audio access', status: 'idle', icon: <Phone /> },
+    { id: '2', title: 'Capture Session', description: 'Browser session; no phone-call interception', status: 'idle', icon: <Server /> },
+    { id: '3', title: 'Audio Recording', description: 'MediaRecorder captures a user-selected clip', status: 'idle', icon: <Mic /> },
+    { id: '4', title: 'Gemini Audio Review', description: 'Server-side review of the submitted recording', status: 'idle', icon: <Cpu /> },
+    { id: '5', title: 'Result Review', description: 'Screening result; no automatic call blocking', status: 'idle', icon: <Zap /> }
   ]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -705,10 +725,21 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type.startsWith('audio/')) {
-      setUploadedFile(file);
-      setIsCallActive(false); // Stop live mode if file is uploaded
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      setToast({ message: "Please select a supported audio file." });
+      e.target.value = "";
+      return;
     }
+    if (file.size > 3 * 1024 * 1024) {
+      setToast({ message: "Audio files must be 3 MB or smaller." });
+      e.target.value = "";
+      return;
+    }
+    setUploadedFile(file);
+    setAiAnalysis(null);
+    setRiskScore(0);
+    setIsCallActive(false);
   };
 
   const playUploadedFile = async () => {
@@ -757,18 +788,29 @@ export default function App() {
       setToast({ message: "Forensic Warning: No neural speech activity identified. Accuracy may be degraded." });
     }
 
+    if (uploadedFile.size > 3 * 1024 * 1024) {
+      setToast({ message: "Audio files must be 3 MB or smaller." });
+      return;
+    }
+    const analysisStartedAt = performance.now();
     setIsAnalyzing(true);
     setAiAnalysis(null);
-    playUploadedFile(); // Start playback for visualization
+    playUploadedFile(); // Preview playback only; the screening request is handled by the server.
 
     try {
       // Convert file to base64
       const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
+      const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => {
           const result = reader.result as string;
-          resolve(result.split(',')[1]);
+          const separator = result.indexOf(",");
+          if (separator < 0) {
+            reject(new Error("Could not read the selected audio file."));
+            return;
+          }
+          resolve(result.slice(separator + 1));
         };
+        reader.onerror = () => reject(new Error("Could not read the selected audio file."));
         reader.readAsDataURL(uploadedFile);
       });
 
@@ -777,6 +819,16 @@ export default function App() {
       
       setAiAnalysis(result);
       setRiskScore(result.riskScore);
+      setDashboardStats(prev => ({
+        ...prev,
+        callsMonitored: prev.callsMonitored + 1,
+        syntheticDetected: prev.syntheticDetected + (result.verdict === "authentic" ? 0 : 1),
+        meanLatency: Math.round(performance.now() - analysisStartedAt)
+      }));
+      if (autoBlockEnabled && result.riskScore >= autoBlockThreshold) {
+        stopFilePlayback();
+        setToast({ message: "High-risk sample: preview stopped at your configured threshold." });
+      }
       
       // Update history if user is logged in
       if (user) {
@@ -905,7 +957,7 @@ export default function App() {
       `"${item.phoneNumber}"`,
       `"${item.riskScore}%"`,
       `"${item.duration}"`,
-      `"${getVerdict(item.riskScore).label}"`
+      `"${getVerdict(item.riskScore, item.verdict).label}"`
     ]);
 
     const csvContent = [
@@ -1107,10 +1159,13 @@ export default function App() {
   };
 
   const getVerdict = (score: number, explicitVerdict?: string) => {
-    if (explicitVerdict === 'error') return { label: 'ANALYSIS FAIL', color: 'text-text-tertiary', icon: XCircle, bg: 'bg-border/50 border-border' };
-    if (score > 75) return { label: 'DEEPFAKE', color: 'text-danger', icon: ShieldAlert, bg: 'bg-danger/5 border-danger/20' };
-    if (score > 40) return { label: 'SUSPICIOUS', color: 'text-warning', icon: AlertTriangle, bg: 'bg-warning/5 border-warning/20' };
-    return { label: 'AUTHENTIC', color: 'text-accent', icon: ShieldCheck, bg: 'bg-accent/5 border-accent/20' };
+    if (explicitVerdict === "error") return { label: "ANALYSIS FAIL", color: "text-text-tertiary", icon: XCircle, bg: "bg-border/50 border-border" };
+    if (explicitVerdict === "deepfake") return { label: "DEEPFAKE SCREENING", color: "text-danger", icon: ShieldAlert, bg: "bg-danger/5 border-danger/20" };
+    if (explicitVerdict === "suspicious") return { label: "REVIEW ADVISED", color: "text-warning", icon: AlertTriangle, bg: "bg-warning/5 border-warning/20" };
+    if (explicitVerdict === "authentic") return { label: "LOW CONCERN", color: "text-accent", icon: ShieldCheck, bg: "bg-accent/5 border-accent/20" };
+    if (score > 75) return { label: "DEEPFAKE SCREENING", color: "text-danger", icon: ShieldAlert, bg: "bg-danger/5 border-danger/20" };
+    if (score > 40) return { label: "REVIEW ADVISED", color: "text-warning", icon: AlertTriangle, bg: "bg-warning/5 border-warning/20" };
+    return { label: "LOW CONCERN", color: "text-accent", icon: ShieldCheck, bg: "bg-accent/5 border-accent/20" };
   };
 
   const verdictData = useMemo(() => getVerdict(riskScore, aiAnalysis?.verdict), [riskScore, aiAnalysis]);
@@ -1309,57 +1364,11 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-8"
               >
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                  <StatCard title="Calls Monitored" value={dashboardStats.callsMonitored.toLocaleString()} icon={Phone} trend="+12%" />
-                  <StatCard title="Synthetic Detected" value={dashboardStats.syntheticDetected.toLocaleString()} icon={ShieldAlert} trend="+2%" />
-                  <StatCard title="Accuracy Rate" value={`${dashboardStats.accuracyRate}%`} icon={ShieldCheck} />
-                  <StatCard 
-                    title="Mean Latency" 
-                    value={`${dashboardStats.meanLatency}ms`} 
-                    icon={Zap} 
-                    trend="-4ms"
-                    chart={
-                      <div className="h-full w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={riskTrendData}>
-                            <Line 
-                              type="monotone" 
-                              dataKey="value" 
-                              stroke="#3B82F6" 
-                              strokeWidth={2} 
-                              dot={false} 
-                              isAnimationActive={false}
-                            />
-                            <YAxis hide domain={[0, 100]} />
-                          </LineChart>
-                        </ResponsiveContainer>
-                        <div className="text-[10px] text-text-tertiary font-bold uppercase tracking-tighter opacity-60 text-right -mt-1">
-                          Risk Trend
-                        </div>
-                      </div>
-                    }
-                  />
-                  {(() => {
-                    const quality = getQualityFromSNR(dashboardStats.snr);
-                    return (
-                      <StatCard title="Signal Quality" value={quality.label} icon={quality.icon}>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          {[1, 2, 3, 4].map((step, i) => {
-                            const thresholds = [0, 22, 32, 40];
-                            const isActive = dashboardStats.snr >= thresholds[i];
-                            return (
-                              <div 
-                                key={step} 
-                                className={`h-1 flex-1 rounded-full transition-all duration-500 ${isActive ? (quality.color === 'text-accent' ? 'bg-accent' : (quality.color === 'text-warning' ? 'bg-warning' : 'bg-danger')) : 'bg-border'}`} 
-                              />
-                            );
-                          })}
-                          <span className="text-[9px] font-mono text-text-tertiary ml-1">{Math.round(dashboardStats.snr)}dB</span>
-                        </div>
-                      </StatCard>
-                    );
-                  })()}
+                {/* Metrics from completed sample reviews only */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <StatCard title="Audits Completed" value={dashboardStats.callsMonitored.toLocaleString()} icon={FileAudio} />
+                  <StatCard title="Flagged for Review" value={dashboardStats.syntheticDetected.toLocaleString()} icon={ShieldAlert} />
+                  <StatCard title="Last Analysis Time" value={dashboardStats.meanLatency > 0 ? (dashboardStats.meanLatency / 1000).toFixed(1) + "s" : "—"} icon={Zap} />
                 </div>
 
                 {/* Simulation Area */}
@@ -1372,20 +1381,10 @@ export default function App() {
                           <div className="flex items-center justify-between">
                             <div className="flex flex-col">
                               <h3 className="text-lg font-bold tracking-tight text-text-primary">
-                                Live Signal Processing
+                                Microphone Input Preview
                                 {isCallActive && <span className="ml-2 inline-flex h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />}
                               </h3>
-                              {isCallActive && currentCallNumber && (
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="text-[10px] font-mono text-text-tertiary">Origin: {currentCallNumber}</span>
-                                  {verifiedNumbers.includes(currentCallNumber) && (
-                                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-accent/10 border border-accent/20 text-[8px] font-bold text-accent uppercase tracking-wider">
-                                      <ShieldCheck className="w-2.5 h-2.5" />
-                                      Verified
-                                    </span>
-                                  )}
-                                </div>
-                              )}
+
                             </div>
                             <div className="flex items-center gap-3">
                               {/* Viz Config */}
@@ -1476,10 +1475,10 @@ export default function App() {
                                     if (isPlayingFile) stopFilePlayback();
                                   }}
                                   className="bg-danger/10 text-danger px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border border-danger/10"
-                                  aria-label={isPlayingFile ? 'Stop Audio Analysis' : 'Stop Live Agent Simulation'}
+                                  aria-label={isPlayingFile ? 'Stop Audio Preview' : 'Stop Microphone Preview'}
                                 >
                                   <PhoneOff className="w-3.5 h-3.5 inline mr-2" /> 
-                                  {isPlayingFile ? 'Stop Analysis' : 'Stop Agent'}
+                                  {isPlayingFile ? 'Stop Preview' : 'Stop Microphone'}
                                 </button>
                               ) : (
                                 <button 
@@ -1491,10 +1490,10 @@ export default function App() {
                                     }
                                   }}
                                   className="bg-accent text-white px-5 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all shadow-sm"
-                                  aria-label={uploadedFile ? 'Run Deepfake Audit on uploaded file' : 'Start real-time deepfake analysis'}
+                                  aria-label={uploadedFile ? 'Preview uploaded audio' : 'Start microphone preview'}
                                 >
                                   {uploadedFile ? <Play className="w-3.5 h-3.5 inline mr-2" /> : <Phone className="w-3.5 h-3.5 inline mr-2" />}
-                                  {uploadedFile ? 'Run Audit' : 'Start Analysis'}
+                                  {uploadedFile ? 'Preview Audio' : 'Start Microphone'}
                                 </button>
                               )}
                             </div>
@@ -1536,8 +1535,8 @@ export default function App() {
                              ) : !isCallActive ? (
                                <div className="text-center">
                                  <Activity className="w-8 h-8 text-text-tertiary mx-auto mb-3 opacity-30" />
-                                 <p className="text-sm font-medium text-text-secondary">Ready for incoming stream</p>
-                                 <p className="text-[10px] mt-2 font-bold text-text-tertiary uppercase tracking-widest">Protocol: Idle</p>
+                                 <p className="text-sm font-medium text-text-secondary">Ready for microphone input</p>
+                                 <p className="text-[10px] mt-2 font-bold text-text-tertiary uppercase tracking-widest">Capture: Idle</p>
                                </div>
                              ) : (
                                <div className="w-full h-full flex flex-col items-center">
@@ -1551,7 +1550,7 @@ export default function App() {
                                      <verdictData.icon className="w-6 h-6" />
                                    </div>
                                    <h4 className={`text-3xl font-black tracking-tighter ${verdictData.color}`}>{verdictData.label}</h4>
-                                   <p className="text-[10px] font-bold uppercase tracking-widest mt-1 text-text-tertiary">Real-time Inference Profile</p>
+                                   <p className="text-[10px] font-bold uppercase tracking-widest mt-1 text-text-tertiary">Microphone preview only — submit a recording for screening</p>
                                  </div>
 
                                  <div className="w-full flex items-center gap-10">
@@ -1560,7 +1559,7 @@ export default function App() {
                                    </div>
                                    <div className="text-right">
                                      <div className={`text-4xl font-bold tracking-tighter leading-none ${verdictData.color}`}>{riskScore}<span className="text-base font-medium opacity-50 ml-0.5">%</span></div>
-                                     <div className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary mt-1">Risk Factor</div>
+                                     <div className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary mt-1">Screening Score</div>
                                    </div>
                                  </div>
                                </div>
@@ -1572,21 +1571,14 @@ export default function App() {
                         <div className="w-full md:w-60 flex flex-col gap-6">
                           <h4 className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary px-1">Active Indicators</h4>
                           <div className="flex flex-wrap gap-2">
-                             {(isCallActive && riskScore > 75) ? (
-                               <React.Fragment key="scam-signals">
-                                 <SignalBadge label="Phase Jitter" />
-                                 <SignalBadge label="Synth Reson" />
-                                 <SignalBadge label="PCM Guard" />
-                                 <SignalBadge label="Gap detect" />
-                               </React.Fragment>
-                             ) : isCallActive ? (
-                               <React.Fragment key="natural-signals">
-                                 <SignalBadge label="Natural" />
-                                 <SignalBadge label="Jitter OK" />
-                                 <SignalBadge label="Airflow" />
-                               </React.Fragment>
+                             {aiAnalysis?.signals?.length ? (
+                               aiAnalysis.signals.slice(0, 6).map((signal: string, index: number) => (
+                                 <SignalBadge key={index} label={signal.slice(0, 28)} />
+                               ))
                              ) : (
-                               <div key="monitoring-state" className="text-[10px] font-medium text-text-tertiary italic px-1">Monitoring...</div>
+                               <div className="text-[10px] font-medium text-text-tertiary italic px-1">
+                                 {isSpeechDetected ? "Speech activity detected; no authenticity result yet." : "No analysis signals. Submit an audio sample to review."}
+                               </div>
                              )}
                           </div>
                           
@@ -1594,16 +1586,16 @@ export default function App() {
                             <h5 className="text-[10px] font-bold text-text-tertiary uppercase tracking-[0.2em]">Neural Architecture</h5>
                             <div className="space-y-2.5">
                               <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
-                                <span className="text-text-tertiary">Model Engine</span>
-                                <span className="text-text-primary">AASIST v4.2.0</span>
+                                <span className="text-text-tertiary">Review Engine</span>
+                                <span className="text-text-primary">Gemini API</span>
                               </div>
                               <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
-                                <span className="text-text-tertiary">Last Trained</span>
-                                <span className="text-text-primary">OCT 14, 2025</span>
+                                <span className="text-text-tertiary">Execution</span>
+                                <span className="text-text-primary">Server-side</span>
                               </div>
                               <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
-                                <span className="text-text-tertiary">Optimization</span>
-                                <span className="text-accent">GPU / FP16</span>
+                                <span className="text-text-tertiary">Output</span>
+                                <span className="text-accent">Screening aid</span>
                               </div>
                             </div>
                           </div>
@@ -1616,7 +1608,7 @@ export default function App() {
                       <div className="flex items-center justify-between mb-8">
                         <div>
                           <h3 className="text-lg font-bold tracking-tight text-text-primary">Test Lab Bench</h3>
-                          <p className="text-xs text-text-tertiary mt-1">Upload recorded samples to stress-test detection accuracy.</p>
+                          <p className="text-xs text-text-tertiary mt-1">Submit a recording for Gemini-assisted screening. This is not a validated forensic detector.</p>
                         </div>
                         <label className="cursor-pointer group">
                           <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} />
@@ -1799,8 +1791,8 @@ export default function App() {
                                 <button 
                                   onClick={() => toggleVerify(item.id)}
                                   className={`p-2 transition-all rounded-lg border ${item.isVerified ? 'bg-accent text-white border-accent' : 'hover:bg-bg border-transparent text-text-tertiary'}`}
-                                  title={item.isVerified ? 'Voice Verified' : 'Verify Voice Fingerprint'}
-                                  aria-label={item.isVerified ? 'Verified voice details' : 'Verify this voice fingerprint'}
+                                  title={item.isVerified ? 'Trusted Label' : 'Mark as trusted reference label'}
+                                  aria-label={item.isVerified ? 'Verified voice details' : 'Mark this record as a trusted reference label'}
                                 >
                                   <ShieldCheck className="w-4 h-4" aria-hidden="true" />
                                 </button>
@@ -1852,21 +1844,11 @@ export default function App() {
 
                     <div className="bg-gradient-to-br from-accent/20 to-accent/5 border border-accent/20 rounded-2xl p-6">
                       <h4 className="text-sm font-bold text-accent mb-2 uppercase tracking-tight flex items-center gap-2">
-                        <Zap className="w-4 h-4" /> Hardware Acceleration
+                        <Zap className="w-4 h-4" /> Server-side audio review
                       </h4>
-                      <p className="text-xs text-text-secondary leading-relaxed mb-4">
-                        System is currently offloading AASIST inference to the mobile GPU (OpenCL) for sub-10ms response times.
+                      <p className="text-xs text-text-secondary leading-relaxed">
+                        Submitted recordings are reviewed by the configured Gemini model on the server. Results are screening signals, not validated forensic determinations.
                       </p>
-                      <div className="flex items-center gap-4">
-                        <div className="flex-1 h-1.5 bg-accent/20 rounded-full overflow-hidden">
-                          <motion.div 
-                            className="h-full bg-accent" 
-                            animate={{ width: isCallActive ? '85%' : '20%' }}
-                            transition={{ duration: 1 }}
-                          />
-                        </div>
-                        <span className="text-[10px] font-mono text-accent">NPU ACTIVE</span>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1884,7 +1866,7 @@ export default function App() {
                 <div className="text-center space-y-4">
                    <h3 className="text-3xl font-black tracking-tighter uppercase italic">The Guardian Protocol</h3>
                    <p className="text-text-secondary max-w-xl mx-auto text-sm leading-relaxed">
-                     Detailed architectural breakdown of the real-time deepfake detection engine. From signal interception to neural inference.
+                     Current browser workflow for capturing audio and requesting a server-side screening review.
                    </p>
                 </div>
 
@@ -1893,38 +1875,38 @@ export default function App() {
                    <div className="space-y-12 relative z-10">
                       {[
                         { 
-                          phase: "INTERCEPTION", 
-                          title: "PhoneStateReceiver", 
-                          subtitle: "BroadcastReceiver — OFFHOOK",
-                          details: "Registers globally with the Android Manifest to listen for telephony state transitions. Triggers instantly on incoming or outgoing call connection.",
+                          phase: "PERMISSION", 
+                          title: "Browser Microphone Access", 
+                          subtitle: "User-granted MediaDevices API",
+                          details: "The browser requests microphone access after the user starts a capture session. This does not read cellular call state or caller identity.",
                           icon: <Phone className="w-6 h-6" />
                         },
                         { 
-                          phase: "INITIALIZATION", 
-                          title: "GuardianService", 
-                          subtitle: "ForegroundService — Mic Type",
-                          details: "Spawns a persistent foreground process with high-priority status to prevent OS background harvesting. Requests strict audio focus.",
+                          phase: "CAPTURE SESSION", 
+                          title: "Browser Audio Session", 
+                          subtitle: "Page-managed capture lifecycle",
+                          details: "Capture runs while the web application is open and permission remains available. There is no Android foreground service in this repository.",
                           icon: <Server className="w-6 h-6" />
                         },
                         { 
                           phase: "ACQUISITION", 
-                          title: "AudioRecord Pipeline", 
-                          subtitle: "16kHz Mono / VOICE_COMMUNICATION",
-                          details: "Opens a raw PCM stream with hardware echo cancellation. Buffers audio in 1-second rolling windows for block-based inference.",
+                          title: "MediaRecorder Audio Capture", 
+                          subtitle: "Browser-supported audio recording",
+                          details: "Captures a user-selected microphone stream into an audio file. The waveform display is a preview, not a deepfake classifier.",
                           icon: <Mic className="w-6 h-6" />
                         },
                         { 
-                          phase: "NEURAL INFERENCE", 
-                          title: "DeepfakeDetector (TFLite)", 
-                          subtitle: "AASIST Model Architecture",
-                          details: "Inference engine analyzes prosody, spectral distribution, and phase consistency. Extracts the synthetic footprint of generative AI models.",
+                          phase: "AUDIO REVIEW", 
+                          title: "Gemini Multimodal Review", 
+                          subtitle: "Server-side API request",
+                          details: "The submitted clip is reviewed by a general multimodal model. Its output is a screening aid and is not a validated anti-spoofing determination.",
                           icon: <Cpu className="w-6 h-6" />
                         },
                         { 
-                          phase: "MITIGATION", 
-                          title: "Real-time Intervention", 
-                          subtitle: "Alerting & Overlay UI",
-                          details: "If risk exceeds 75%, high-priority notifications are dispatched to the system tray and a persistent overlay warns the user of a potential scam.",
+                          phase: "REVIEW", 
+                          title: "User Review & Verification", 
+                          subtitle: "Result explanation and saved history",
+                          details: "Users review the model's explanation and should verify consequential results independently. The browser cannot disconnect or block phone calls.",
                           icon: <ShieldAlert className="w-6 h-6" />
                         }
                       ].map((node, i) => (
@@ -2012,7 +1994,7 @@ export default function App() {
                           <th className="px-6 py-5">Status</th>
                           <th className="px-6 py-5">Origin</th>
                           <th className="px-6 py-5 text-right font-mono">Timestamp</th>
-                          <th className="px-6 py-5">Risk Factor</th>
+                          <th className="px-6 py-5">Screening Score</th>
                           <th className="px-6 py-5">Call Duration</th>
                           <th className="px-6 py-5">Verdict</th>
                           <th className="px-6 py-5 text-right">Action</th>
@@ -2037,7 +2019,7 @@ export default function App() {
                              <td className="px-6 py-5 text-xs text-text-secondary font-medium">{item.duration}</td>
                              <td className="px-6 py-5">
                                 <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${getVerdict(item.riskScore).bg} ${getVerdict(item.riskScore).color}`}>
-                                  {getVerdict(item.riskScore).label}
+                                  {getVerdict(item.riskScore, item.verdict).label}
                                 </span>
                              </td>
                              <td className="px-6 py-5 text-right">
@@ -2108,10 +2090,10 @@ export default function App() {
                       <div className="space-y-1 flex-1">
                         <div className="flex items-center gap-2">
                           <Ban className="w-4 h-4 text-accent" />
-                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Automated Call Termination</label>
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Stop Playback on High-Risk Sample</label>
                         </div>
                         <p className="text-xs text-text-tertiary leading-relaxed">
-                          Automatically disconnect calls and black-list the originating number when individual risk factors exceed the defined threshold.
+                          Stop the current sample preview when its screening score reaches the selected threshold. This does not control the phone dialer or disconnect calls.
                         </p>
                       </div>
                       <button 
@@ -2136,8 +2118,8 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between">
                             <div className="space-y-1">
-                              <label id="threshold-label" className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">Inference Confidence Threshold</label>
-                              <p className="text-[11px] text-text-tertiary opacity-70">Define the sensitivity of the AASIST-V2 detection gate.</p>
+                              <label id="threshold-label" className="text-[11px] font-bold text-text-tertiary uppercase tracking-widest">Screening Score Threshold</label>
+                              <p className="text-[11px] text-text-tertiary opacity-70">Choose when Guardian should stop preview playback for a flagged sample.</p>
                             </div>
                             <div className="flex items-center gap-4">
                                <div className="flex items-center gap-1 bg-bg border border-border rounded-lg p-1">
@@ -2304,7 +2286,7 @@ export default function App() {
                                 <div className="p-4 bg-accent/5 border border-accent/10 rounded-xl flex items-start gap-4">
                                    <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
                                    <p className="text-[11px] text-text-secondary leading-relaxed">
-                                      Higher intensity can reduce noise but may introduce spectral distortion, potentially impacting the <span className="font-bold">AASIST-V2</span> model's phase coherence analysis.
+                                      This preference is currently stored only. Audio denoising is not implemented, and it does not modify the recording submitted for review.
                                    </p>
                                 </div>
                              </motion.div>
@@ -2367,14 +2349,14 @@ export default function App() {
                        </div>
                     </div>
 
-                    {/* Verified Voice Fingerprints Section */}
+                    {/* Trusted Reference Labels (local) Section */}
                     <div className="pt-10 border-t border-border space-y-6">
                        <div className="flex items-center gap-2 mb-2">
                           <ShieldCheck className="w-4 h-4 text-accent" />
-                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Verified Voice Fingerprints</label>
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Trusted Reference Labels (local)</label>
                        </div>
                        <div className="space-y-4">
-                          <p className="text-[11px] text-text-tertiary max-w-sm">Trusted identities with biometric voice validation. Risk assessments are suppressed for these callers.</p>
+                          <p className="text-[11px] text-text-tertiary max-w-sm">These labels are saved in this browser only. They do not perform biometric verification or suppress an audio review.</p>
                           <div className="flex gap-2">
                              <input 
                                type="text"
@@ -2419,11 +2401,11 @@ export default function App() {
                        </div>
                     </div>
 
-                    {/* Blocked Numbers Section */}
+                    {/* Local Blocklist Labels Section */}
                     <div className="pt-10 border-t border-border space-y-6">
                        <div className="flex items-center gap-2 mb-2">
                           <Ban className="w-4 h-4 text-danger" />
-                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Blocked Numbers</label>
+                          <label className="text-sm font-bold text-text-primary uppercase tracking-wide">Local Blocklist Labels</label>
                        </div>
                        <div className="space-y-4">
                           <div className="flex gap-2">
@@ -2478,7 +2460,7 @@ export default function App() {
 
         {/* --- Global Overlay (Simulation) --- */}
         <AnimatePresence>
-          {isCallActive && riskScore > 80 && (
+          {aiAnalysis?.verdict === "deepfake" && (
             <motion.div 
               key="global-risk-alert"
               initial={{ opacity: 0, scale: 0.9, y: 50 }}
@@ -2494,15 +2476,15 @@ export default function App() {
                     <ShieldAlert className="w-6 h-6" />
                   </div>
                   <div>
-                    <h4 className="font-black text-lg leading-tight uppercase italic tracking-tighter">DEEPFAKE DETECTED</h4>
-                    <span className="text-[10px] font-mono uppercase tracking-widest opacity-80">Security Protocol 7A</span>
+                    <h4 className="font-black text-lg leading-tight uppercase italic tracking-tighter">HIGH-RISK SAMPLE FLAGGED</h4>
+                    <span className="text-[10px] font-mono uppercase tracking-widest opacity-80">Audio screening result</span>
                   </div>
                 </div>
                 <p className="text-sm leading-relaxed mb-6 opacity-90">
-                  Pattern mismatch detected in current audio stream. Synthetic vocal artifacts identified. 
+                  Gemini's audio screening flagged the submitted recording for further review. This result is not proof of a deepfake. 
                 </p>
                 <div className="flex gap-3">
-                  <button onClick={() => setIsCallActive(false)} className="flex-1 bg-card border border-border text-danger py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-bg transition-all">Disconnect</button>
+                  <button onClick={() => setIsCallActive(false)} className="flex-1 bg-card border border-border text-danger py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-bg transition-all">Stop Preview</button>
                   <button className="px-4 py-2.5 bg-black/20 rounded-xl text-xs font-bold uppercase tracking-wider border border-white/10 hover:bg-black/30 transition-all">Report</button>
                 </div>
               </div>
@@ -2535,7 +2517,7 @@ export default function App() {
                   </div>
                   <h3 id="block-dialog-title" className="text-xl font-bold tracking-tight text-text-primary mb-2">Block this sender?</h3>
                   <p className="text-xs text-text-tertiary leading-relaxed mb-8">
-                    Incoming calls from <span className="text-text-primary font-bold">{selectedForBlock.phoneNumber}</span> will be automatically rejected and routed to the quarantine queue.
+                    This marks the selected history record as blocked inside Guardian. It does not block calls at the phone or carrier level.
                   </p>
                   <div className="flex flex-col w-full gap-3">
                     <button 
@@ -2581,7 +2563,7 @@ export default function App() {
                   </div>
                   <h3 className="text-xl font-bold tracking-tight text-text-primary mb-2">Remove Verification?</h3>
                   <p className="text-xs text-text-tertiary leading-relaxed mb-8">
-                    Removing <span className="text-text-primary font-bold">{numberToUnverify}</span> will disable biometric bypass and subject the caller to full AASIST analysis.
+                    Removing this local reference label does not change the analysis model or verify a person's identity.
                   </p>
                   <div className="flex flex-col w-full gap-3">
                     <button 
@@ -2684,11 +2666,7 @@ export default function App() {
                   </p>
                   <div className="flex flex-col w-full gap-3">
                     <button 
-                      onClick={() => {
-                         setHistory([]);
-                         setShowClearConfirm(false);
-                         setToast({ message: 'All logs cleared' });
-                      }}
+                      onClick={clearAllHistory}
                       className="w-full py-3 bg-danger text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-danger/20 hover:brightness-110 transition-all"
                     >
                       Confirm Clear
