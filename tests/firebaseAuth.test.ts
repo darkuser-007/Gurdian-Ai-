@@ -87,3 +87,25 @@ test("maps Firebase service failures to a retryable server error", async () => {
     (error: unknown) => error instanceof FirebaseAuthError && error.statusCode === 503
   );
 });
+
+
+test("rejects an ID token issued too far in the future", async () => {
+  const token = makeIdToken({ iat: Math.floor(Date.now() / 1000) + 120 });
+  await assert.rejects(
+    () => verifyFirebaseIdToken("Bearer " + token, async () => {
+      throw new Error("Firebase must not be contacted for invalid claims");
+    }),
+    (error: unknown) => error instanceof FirebaseAuthError && error.code === "INVALID_TOKEN"
+  );
+});
+
+test("rejects an expired ID token before contacting Firebase", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const token = makeIdToken({ iat: now - 120, exp: now - 1 });
+  await assert.rejects(
+    () => verifyFirebaseIdToken("Bearer " + token, async () => {
+      throw new Error("Firebase must not be contacted for expired claims");
+    }),
+    (error: unknown) => error instanceof FirebaseAuthError && error.code === "INVALID_TOKEN"
+  );
+});
