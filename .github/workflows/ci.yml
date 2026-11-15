@@ -63,6 +63,9 @@ jobs:
     # Only trusted pushes to main may update the lockfile. Pull requests never
     # receive a write-capable token or execute this maintenance job.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: guardian-ai-dependency-maintenance
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -101,7 +104,20 @@ jobs:
           node - <<'NODE'
           const fs = require("node:fs");
           const report = JSON.parse(fs.readFileSync("npm-audit-final.json", "utf8"));
-          console.log("Post-fix dependency vulnerability totals:", report.metadata?.vulnerabilities ?? "unavailable");
+          const totals = report.metadata?.vulnerabilities;
+          if (!totals) {
+            console.error("Final npm audit did not return vulnerability metadata; refusing to update the lockfile.");
+            process.exit(1);
+          }
+          const baseline = JSON.parse(fs.readFileSync("security/dependency-audit-baseline.json", "utf8"));
+          console.log("Post-fix dependency vulnerability totals:", totals);
+          if ((totals.critical ?? 0) > baseline.maxCritical ||
+              (totals.high ?? 0) > baseline.maxHigh ||
+              (totals.moderate ?? 0) > baseline.maxModerate ||
+              (totals.low ?? 0) > baseline.maxLow) {
+            console.error("Dependency maintenance would exceed the reviewed security baseline; refusing to commit.");
+            process.exit(1);
+          }
           for (const [name, item] of Object.entries(report.vulnerabilities ?? {})) {
             console.log(JSON.stringify({
               name,
