@@ -112,7 +112,7 @@ class MainActivity : Activity() {
         numberInput = EditText(this).apply {
             hint = "+919876543210"
             inputType = InputType.TYPE_CLASS_PHONE
-            singleLine = true
+            setSingleLine(true)
             textSize = 15f
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = android.graphics.drawable.GradientDrawable().apply {
