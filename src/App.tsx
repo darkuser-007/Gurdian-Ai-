@@ -2222,7 +2222,7 @@ export default function App() {
                   </div>
                   
                   <div className="p-8 space-y-10">
-                    {/* Auto-Block Section */}
+                    {/* Threshold-triggered sample preview stop */}
                     <div className="flex items-start justify-between gap-6">
                       <div className="space-y-1 flex-1">
                         <div className="flex items-center gap-2">
@@ -2321,7 +2321,7 @@ export default function App() {
                           <div className="bg-bg/50 border border-border p-4 rounded-xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
                              <div className={`w-2 h-2 rounded-full ${autoBlockThreshold > 85 ? 'bg-danger' : 'bg-accent'} animate-pulse`} />
                              <p className="text-[11px] text-text-secondary font-medium leading-tight">
-                               Current configuration stops sample preview playback when the screening concern score reaches <span className="font-bold text-text-primary">{autoBlockThreshold >= 90 ? 'Critical' : 'High'}</span> screening concern threshold. It does not block phone calls.
+                               Current configuration stops sample preview playback when the screening concern score reaches <span className="font-bold text-text-primary">{autoBlockThreshold}%</span>. It does not block phone calls.
                              </p>
                           </div>
                         </motion.div>
