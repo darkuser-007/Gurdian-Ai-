@@ -1,10 +1,13 @@
-import { AudioAnalysisError } from "../server/audioAnalysis";
+import { AudioAnalysisError, analyzeAudioForDeepfake } from "../server/audioAnalysis";
 import { FirebaseAuthError, verifyFirebaseIdToken } from "../server/firebaseAuth";
-import { analyzeAudioForDeepfake } from "../server/audioAnalysis";
+import { createInMemoryRateLimiter } from "../server/rateLimit";
 
-const WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 8;
-const requestCounts = new Map<string, { count: number; resetAt: number }>();
+// Bounded per-function-instance abuse guard; this is not a global quota.
+const audioReviewLimiter = createInMemoryRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 8,
+  maxEntries: 10_000
+});
 
 export const config = {
   api: {
@@ -12,25 +15,12 @@ export const config = {
   }
 };
 
-// This in-memory limiter is a per-function-instance guard. Firebase auth is
-// mandatory; use a shared rate-limit store before running at high scale.
-function isRateLimited(uid: string): boolean {
-  const now = Date.now();
-  for (const [userId, entry] of requestCounts) {
-    if (entry.resetAt <= now) requestCounts.delete(userId);
-  }
 
-  const current = requestCounts.get(uid);
-  if (!current || current.resetAt <= now) {
-    requestCounts.set(uid, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  if (current.count >= MAX_REQUESTS_PER_WINDOW) return true;
-  current.count += 1;
-  return false;
-}
 
 export default async function handler(req: any, res: any) {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed." });
@@ -38,8 +28,13 @@ export default async function handler(req: any, res: any) {
 
   try {
     const identity = await verifyFirebaseIdToken(req.headers?.authorization);
-    if (isRateLimited(identity.uid)) {
-      return res.status(429).json({ error: "You have reached the audio review limit. Wait one minute and try again." });
+    const rateLimit = audioReviewLimiter.consume(identity.uid);
+    if (!rateLimit.allowed) {
+      res.setHeader("Retry-After", String(rateLimit.retryAfterSeconds));
+      return res.status(429).json({
+        error: "You have reached the audio review limit. Wait before trying again.",
+        retryAfterSeconds: rateLimit.retryAfterSeconds
+      });
     }
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
