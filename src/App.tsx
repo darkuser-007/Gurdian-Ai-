@@ -1029,10 +1029,8 @@ export default function App() {
 
         ctx.clearRect(0, 0, width, height);
         
-        // Color based on risk
-        let color = '#3B82F6'; 
-        if (riskScore > 75) color = '#EF4444';
-        else if (riskScore > 40) color = '#F59E0B';
+        // This canvas visualizes microphone input; it does not represent risk.
+        const color = "#3B82F6";
 
         if (mode === 'frequency') {
           analyserRef.current.getByteFrequencyData(dataArray);
@@ -1097,9 +1095,8 @@ export default function App() {
 
       ctx.clearRect(0, 0, width, height);
       
-      let color = '#3B82F6';
-      if (riskScore > 75) color = '#EF4444';
-      else if (riskScore > 40) color = '#F59E0B';
+      // This simulated waveform is a visual placeholder, not a risk result.
+      const color = "#3B82F6";
 
       if (mode === 'frequency') {
         const bars = 64;
@@ -1168,7 +1165,17 @@ export default function App() {
     return { label: "LOW CONCERN", color: "text-accent", icon: ShieldCheck, bg: "bg-accent/5 border-accent/20" };
   };
 
-  const verdictData = useMemo(() => getVerdict(riskScore, aiAnalysis?.verdict), [riskScore, aiAnalysis]);
+  const verdictData = useMemo(() => {
+    if (!aiAnalysis) {
+      return {
+        label: isCallActive ? "PREVIEW ONLY" : "AWAITING SAMPLE",
+        color: "text-text-tertiary",
+        icon: Activity,
+        bg: "bg-column/50 border-border"
+      };
+    }
+    return getVerdict(riskScore, aiAnalysis.verdict);
+  }, [riskScore, aiAnalysis, isCallActive]);
 
   return (
     <div className="min-h-screen flex flex-col sm:flex-row">
@@ -1232,7 +1239,7 @@ export default function App() {
                 )}
                 <div className="flex flex-col min-w-0">
                   <span className="text-[11px] font-bold text-text-primary truncate">{user.displayName || 'Guardian User'}</span>
-                  <span className="text-[9px] text-text-tertiary truncate uppercase tracking-tighter">Verified Agent</span>
+                  <span className="text-[9px] text-text-tertiary truncate uppercase tracking-tighter">Signed in</span>
                 </div>
               </div>
               <button 
@@ -1261,7 +1268,7 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 px-3 py-2 bg-bg rounded-lg border border-border">
               <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-              <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">Live</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">Microphone</span>
             </div>
             <button 
               onClick={() => setIsDarkMode(!isDarkMode)}
@@ -1285,7 +1292,7 @@ export default function App() {
             <div className="h-6 w-px bg-border hidden sm:block mx-4" />
             <div className="hidden sm:flex items-center gap-2 text-text-secondary text-xs uppercase tracking-wider font-semibold">
               <Activity className="w-3 h-3 text-accent" />
-              Global Risk: <span className="text-accent ml-1">Low</span>
+              Latest Sample: <span className="text-accent ml-1">{aiAnalysis ? aiAnalysis.verdict.toUpperCase() : "NOT ANALYZED"}</span>
             </div>
           </div>
 
@@ -1507,7 +1514,7 @@ export default function App() {
                                  </div>
                                  <p className="text-sm font-bold text-text-primary mb-2">Access Issue Detected</p>
                                  <p className="text-[11px] text-text-secondary leading-relaxed mb-6">
-                                   Guardian requires microphone access for real-time analysis. Click the <span className="font-bold">lock icon</span> in your address bar to enable permissions.
+                                   Guardian needs microphone permission for audio preview or recording. Click the <span className="font-bold">lock icon</span> in your address bar to enable access.
                                    {!window.isSecureContext && <span className="block mt-2 text-danger font-bold">Error: Non-secure context detected.</span>}
                                  </p>
                                  <div className="flex flex-col gap-2">
@@ -1558,7 +1565,7 @@ export default function App() {
                                       <canvas ref={canvasRef} width={400} height={40} className="w-full opacity-40 rounded-lg" />
                                    </div>
                                    <div className="text-right">
-                                     <div className={`text-4xl font-bold tracking-tighter leading-none ${verdictData.color}`}>{riskScore}<span className="text-base font-medium opacity-50 ml-0.5">%</span></div>
+                                     <div className={`text-4xl font-bold tracking-tighter leading-none ${verdictData.color}`}>{aiAnalysis ? riskScore : "—"}{aiAnalysis && <span className="text-base font-medium opacity-50 ml-0.5">%</span>}</div>
                                      <div className="text-[10px] font-bold uppercase tracking-widest text-text-tertiary mt-1">Screening Score</div>
                                    </div>
                                  </div>
@@ -1583,7 +1590,7 @@ export default function App() {
                           </div>
                           
                           <div className="mt-auto pt-6 border-t border-border space-y-4 px-1 pb-2">
-                            <h5 className="text-[10px] font-bold text-text-tertiary uppercase tracking-[0.2em]">Neural Architecture</h5>
+                            <h5 className="text-[10px] font-bold text-text-tertiary uppercase tracking-[0.2em]">Review Service</h5>
                             <div className="space-y-2.5">
                               <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider">
                                 <span className="text-text-tertiary">Review Engine</span>
