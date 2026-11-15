@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Guardian AI</string>
+    <string name="call_screening_service_label">Guardian AI caller blocklist</string>
+    <string name="call_screening_service_description">Rejects incoming numbers that you explicitly add to your local Guardian AI blocklist. It does not inspect call audio.</string>
+</resources>
