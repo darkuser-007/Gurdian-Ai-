@@ -114,3 +114,7 @@ The latest reviewed lockfile has four remaining high-severity npm audit findings
 - `npm test`: audio-input and Firebase-auth validation tests.
 - `npm run build`: frontend production build.
 - Android CI: `gradle testDebugUnitTest assembleDebug --no-daemon` from `android/`; the debug APK is uploaded as a workflow artifact.
+
+## Automated Firestore deployment
+
+A guarded manual GitHub Actions workflow deploys only Firestore rules and indexes after checking the configured named database exists. Set up keyless Google Workload Identity Federation and the two required repository variables by following [docs/FIREBASE_DEPLOYMENT.md](docs/FIREBASE_DEPLOYMENT.md). The workflow does not create or modify database configuration.
