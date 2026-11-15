@@ -28,7 +28,20 @@ jobs:
           node - <<'NODE'
           const fs = require("node:fs");
           const report = JSON.parse(fs.readFileSync("npm-audit.json", "utf8"));
-          console.log("Dependency vulnerability totals:", report.metadata?.vulnerabilities ?? "unavailable");
+          const totals = report.metadata?.vulnerabilities;
+          if (!totals) {
+            console.error("npm audit did not return vulnerability metadata; failing closed.");
+            process.exit(1);
+          }
+          console.log("Dependency vulnerability totals:", totals);
+          const baseline = JSON.parse(fs.readFileSync("security/dependency-audit-baseline.json", "utf8"));
+          if ((totals.critical ?? 0) > baseline.maxCritical ||
+              (totals.high ?? 0) > baseline.maxHigh ||
+              (totals.moderate ?? 0) > baseline.maxModerate ||
+              (totals.low ?? 0) > baseline.maxLow) {
+            console.error("Dependency audit is worse than the reviewed security baseline.");
+            process.exit(1);
+          }
           for (const [name, item] of Object.entries(report.vulnerabilities ?? {})) {
             console.log(JSON.stringify({
               name,
