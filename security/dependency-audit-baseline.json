@@ -1,0 +1,8 @@
+{
+  "maxCritical": 0,
+  "maxHigh": 4,
+  "maxModerate": 0,
+  "maxLow": 0,
+  "reviewedOn": "2026-11-15",
+  "notes": "Four known high-severity findings remain in the Firebase, Firestore, and Node gRPC dependency chain. Reassess before changing this baseline; do not downgrade Firebase to satisfy npm audit."
+}
