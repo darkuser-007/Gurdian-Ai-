@@ -5,26 +5,14 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { AudioAnalysisError, analyzeAudioForDeepfake } from "./server/audioAnalysis";
 import { FirebaseAuthError, verifyFirebaseIdToken } from "./server/firebaseAuth";
+import { createInMemoryRateLimiter } from "./server/rateLimit";
 
-const WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 8;
-const requestCounts = new Map<string, { count: number; resetAt: number }>();
-
-function isRateLimited(uid: string): boolean {
-  const now = Date.now();
-  for (const [userId, entry] of requestCounts) {
-    if (entry.resetAt <= now) requestCounts.delete(userId);
-  }
-
-  const current = requestCounts.get(uid);
-  if (!current || current.resetAt <= now) {
-    requestCounts.set(uid, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  if (current.count >= MAX_REQUESTS_PER_WINDOW) return true;
-  current.count += 1;
-  return false;
-}
+// A bounded process-local guard; high traffic needs a shared distributed store.
+const audioReviewLimiter = createInMemoryRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 8,
+  maxEntries: 10_000
+});
 
 async function startServer() {
   const app = express();
@@ -41,10 +29,17 @@ async function startServer() {
   });
 
   app.post("/api/analyze-audio", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     try {
       const identity = await verifyFirebaseIdToken(req.headers.authorization);
-      if (isRateLimited(identity.uid)) {
-        return res.status(429).json({ error: "You have reached the audio review limit. Wait one minute and try again." });
+      const rateLimit = audioReviewLimiter.consume(identity.uid);
+      if (!rateLimit.allowed) {
+        res.setHeader("Retry-After", String(rateLimit.retryAfterSeconds));
+        return res.status(429).json({
+          error: "You have reached the audio review limit. Wait before trying again.",
+          retryAfterSeconds: rateLimit.retryAfterSeconds
+        });
       }
 
       const result = await analyzeAudioForDeepfake(req.body?.audioBase64, req.body?.mimeType);
