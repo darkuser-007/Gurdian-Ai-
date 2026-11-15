@@ -1580,7 +1580,9 @@ export default function App() {
                           <div className="flex flex-wrap gap-2">
                              {aiAnalysis?.signals?.length ? (
                                aiAnalysis.signals.slice(0, 6).map((signal: string, index: number) => (
-                                 <SignalBadge key={index} label={signal.slice(0, 28)} />
+                                 <span key={index} className="px-2 py-1 rounded bg-accent-soft text-[11px] font-bold text-accent border border-accent/10 uppercase tracking-tighter">
+                                   {signal.slice(0, 28)}
+                                 </span>
                                ))
                              ) : (
                                <div className="text-[10px] font-medium text-text-tertiary italic px-1">
