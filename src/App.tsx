@@ -667,26 +667,12 @@ export default function App() {
   );
 
   const riskTrendData = useMemo(() => {
-    // Generate a trend for the last hour (60 points)
-    // We'll use actual history first, then pad with random-looking but stable data
     const lastHour = Date.now() - 3600000;
-    const historicalPoints = history
+    return history
       .filter(item => item.timestamp.getTime() > lastHour)
+      .slice(-30)
       .map(item => ({ value: item.riskScore, time: item.timestamp.getTime() }));
-
-    // For better visualization, let's create a 30-point trend
-    const points = 30;
-    const now = Date.now();
-    const result = [];
-    for (let i = 0; i < points; i++) {
-        const time = now - (points - i) * 120000; // past 60 mins in 2-min intervals
-        // Find existing history near this time or use current/simulated risk
-        const matchingHistory = historicalPoints.find(h => Math.abs(h.time - time) < 300000);
-        const val = matchingHistory ? matchingHistory.value : (riskScore > 0 && i > points - 5 ? riskScore : 10 + Math.random() * 20);
-        result.push({ value: val });
-    }
-    return result;
-  }, [history, riskScore]);
+  }, [history]);
 
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>([
     { id: '1', title: 'Phone State Observer', description: 'Monitoring OFFHOOK signal', status: 'idle', icon: <Phone /> },
@@ -703,77 +689,19 @@ export default function App() {
 
   // --- Effects ---
 
-  // Handle Simulation Loop
+  // Microphone monitoring is an input preview only. Deepfake screening runs
+  // only after a user submits an audio sample for server-side review.
   useEffect(() => {
-    let interval: any;
     if (isCallActive) {
-      // Assign a simulated caller identity if not present
-      if (!currentCallNumber) {
-        setCurrentCallNumber(`+1 (${Math.floor(200 + Math.random() * 700)}) ${Math.floor(100 + Math.random() * 899)}-${Math.floor(1000 + Math.random() * 8999)}`);
-      }
-
-      setWorkflowSteps(prev => prev.map(s => {
-        if (s.id === '1') return { ...s, status: 'completed' };
-        if (s.id === '2') return { ...s, status: 'completed' };
-        if (s.id === '3') return { ...s, status: 'active' };
-        return s;
-      }));
-
-      // Start audio viz
-      startAudioViz();
-
-      interval = setInterval(() => {
-        const isVerified = currentCallNumber && verifiedNumbers.includes(currentCallNumber);
-        const newScore = isVerified 
-          ? Math.floor(Math.random() * 3) // Extremely low score for verified agents
-          : Math.floor(Math.random() * 35) + (Math.random() > 0.82 ? 62 : 8);
-          
-        setRiskScore(newScore);
-
-        setDashboardStats(prev => ({
-          ...prev,
-          snr: Math.min(50, Math.max(12, prev.snr + (Math.random() * 6 - 3)))
-        }));
-
-        // Automated Mitigation Strategy
-        if (currentCallNumber && blockedNumbers.includes(currentCallNumber)) {
-          setIsCallActive(false);
-          // In a real app, we would add the currentCallNumber to the blocklist here
-          return;
-        }
-
-        if (autoBlockEnabled && newScore >= autoBlockThreshold && !isVerified) {
-          setIsCallActive(false);
-          // In a real app, we would add the currentCallNumber to the blocklist here
-          return;
-        }
-
-        if (!isVerified) {
-          if (newScore > 75) {
-            sendOSNotification(newScore, 'DEEPFAKE');
-          } else if (newScore > 50) {
-            sendOSNotification(newScore, 'SUSPICIOUS');
-          }
-        }
-        
-        setWorkflowSteps(prev => prev.map(s => {
-          if (s.id === '4') return { ...s, status: 'active' };
-          if (s.id === '5' && newScore > 75) return { ...s, status: 'error' };
-          if (s.id === '5' && newScore <= 75) return { ...s, status: 'completed' };
-          return s;
-        }));
-      }, 1000);
+      void startAudioViz();
     } else {
-      setWorkflowSteps(prev => prev.map(s => ({ ...s, status: 'idle' })));
-      setRiskScore(0);
-      setCurrentCallNumber(null);
       stopAudioViz();
+      setWorkflowSteps(prev => prev.map(step => ({ ...step, status: "idle" })));
     }
     return () => {
-      clearInterval(interval);
       stopAudioViz();
     };
-  }, [isCallActive, autoBlockEnabled, autoBlockThreshold, currentCallNumber, selectedDeviceId, blockedNumbers, verifiedNumbers]);
+  }, [isCallActive, selectedDeviceId]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
