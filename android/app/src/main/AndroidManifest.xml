@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.software.telecom" android:required="false" />
+    <application
+        android:allowBackup="false"
+        android:icon="@android:drawable/ic_lock_lock"
+        android:label="Guardian AI"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".GuardianCallScreeningService"
+            android:description="@string/call_screening_service_description"
+            android:exported="true"
+            android:label="@string/call_screening_service_label"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
