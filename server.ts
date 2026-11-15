@@ -4,20 +4,21 @@ import { createServer } from "http";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { AudioAnalysisError, analyzeAudioForDeepfake } from "./server/audioAnalysis";
+import { FirebaseAuthError, verifyFirebaseIdToken } from "./server/firebaseAuth";
 
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS_PER_WINDOW = 8;
 const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
-function isRateLimited(key: string): boolean {
+function isRateLimited(uid: string): boolean {
   const now = Date.now();
-  for (const [client, entry] of requestCounts) {
-    if (entry.resetAt <= now) requestCounts.delete(client);
+  for (const [userId, entry] of requestCounts) {
+    if (entry.resetAt <= now) requestCounts.delete(userId);
   }
 
-  const current = requestCounts.get(key);
+  const current = requestCounts.get(uid);
   if (!current || current.resetAt <= now) {
-    requestCounts.set(key, { count: 1, resetAt: now + WINDOW_MS });
+    requestCounts.set(uid, { count: 1, resetAt: now + WINDOW_MS });
     return false;
   }
   if (current.count >= MAX_REQUESTS_PER_WINDOW) return true;
@@ -34,21 +35,22 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      analysisConfigured: Boolean(process.env.GEMINI_API_KEY)
+      analysisConfigured: Boolean(process.env.GEMINI_API_KEY),
+      authenticationConfigured: true
     });
   });
 
   app.post("/api/analyze-audio", async (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-    if (isRateLimited(clientIp)) {
-      return res.status(429).json({ error: "Too many audio analyses. Wait one minute and try again." });
-    }
-
     try {
+      const identity = await verifyFirebaseIdToken(req.headers.authorization);
+      if (isRateLimited(identity.uid)) {
+        return res.status(429).json({ error: "You have reached the audio review limit. Wait one minute and try again." });
+      }
+
       const result = await analyzeAudioForDeepfake(req.body?.audioBase64, req.body?.mimeType);
       return res.json(result);
     } catch (error: unknown) {
-      if (error instanceof AudioAnalysisError) {
+      if (error instanceof FirebaseAuthError || error instanceof AudioAnalysisError) {
         return res.status(error.statusCode).json({ error: error.message, code: error.code });
       }
       console.error("Audio analysis route failed:", error);
