@@ -73,9 +73,13 @@ export async function verifyFirebaseIdToken(
     claims.iss !== "https://securetoken.google.com/" + firebaseConfig.projectId ||
     typeof claims.sub !== "string" ||
     claims.sub.length === 0 ||
+    claims.sub.length > 128 ||
     typeof claims.iat !== "number" ||
+    claims.iat < 0 ||
+    claims.iat > nowSeconds + 60 ||
     typeof claims.exp !== "number" ||
-    claims.exp <= nowSeconds
+    claims.exp <= nowSeconds ||
+    claims.exp <= claims.iat
   ) {
     throw new FirebaseAuthError("Your sign-in token is invalid or expired. Sign in again.", 401, "INVALID_TOKEN");
   }
