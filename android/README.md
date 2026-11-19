@@ -11,11 +11,11 @@ A native Android companion for Guardian AI. It screens incoming caller metadata 
 - Duplicate/invalid number feedback and confirmation before destructive actions.
 - Blocklist count and helpful empty/search states.
 - Custom Guardian shield app icon.
-- Updated Android build toolchain and SDK target.
+- Updated Android Gradle Plugin, Kotlin Gradle Plugin, Gradle and Android SDK toolchain.
 
 ## Build
 
-Requires JDK 17, Android SDK Platform 36, Build Tools 36.0.0, and Gradle 9.6.0.
+Requires JDK 17, Android SDK Platform 36, Build Tools 36.0.0, Android Gradle Plugin 9.3.1, Kotlin Gradle Plugin 2.4.21 and Gradle 9.5.0.
 
 ```bash
 gradle testDebugUnitTest assembleDebug --no-daemon
