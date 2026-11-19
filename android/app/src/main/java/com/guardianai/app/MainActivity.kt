@@ -36,7 +36,7 @@ class MainActivity : Activity() {
     private val ink = Color.rgb(11, 31, 42)
     private val muted = Color.rgb(91, 112, 120)
     private val teal = Color.rgb(15, 118, 110)
-    private val background = Color.rgb(244, 248, 247)
+    private val canvasColor = Color.rgb(244, 248, 247)
     private val surface = Color.WHITE
     private val border = Color.rgb(224, 235, 232)
     private val paleMint = Color.rgb(230, 247, 243)
@@ -64,8 +64,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildScreen() {
-        window.statusBarColor = background
-        window.navigationBarColor = background
+        window.statusBarColor = canvasColor
+        window.navigationBarColor = canvasColor
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
@@ -77,7 +77,7 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply {
             setFillViewport(true)
             clipToPadding = false
-            setBackgroundColor(background)
+            setBackgroundColor(canvasColor)
             isVerticalScrollBarEnabled = false
         }
         val content = LinearLayout(this).apply {
