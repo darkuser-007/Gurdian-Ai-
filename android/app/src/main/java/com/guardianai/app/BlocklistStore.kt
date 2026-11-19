@@ -2,6 +2,10 @@ package com.guardianai.app
 
 import android.content.Context
 
+/**
+ * Device-local storage for the user's explicit caller blocklist.
+ * Always copy SharedPreferences string sets before mutating them.
+ */
 object BlocklistStore {
     private const val PREFERENCES = "guardian_call_screening"
     private const val BLOCKED_NUMBERS = "blocked_numbers"
@@ -9,9 +13,8 @@ object BlocklistStore {
     private fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-    fun getBlockedNumbers(context: Context): Set<String> {
-        return preferences(context).getStringSet(BLOCKED_NUMBERS, emptySet()).orEmpty().toSet()
-    }
+    fun getBlockedNumbers(context: Context): Set<String> =
+        preferences(context).getStringSet(BLOCKED_NUMBERS, emptySet()).orEmpty().toSet()
 
     fun add(context: Context, rawNumber: String): Boolean {
         if (!PhoneNumberNormalizer.isValid(rawNumber)) return false
@@ -29,9 +32,12 @@ object BlocklistStore {
         }
     }
 
+    fun clear(context: Context) {
+        preferences(context).edit().remove(BLOCKED_NUMBERS).apply()
+    }
+
     fun isBlocked(context: Context, incomingNumber: String?): Boolean {
         if (incomingNumber.isNullOrBlank() || !PhoneNumberNormalizer.isValid(incomingNumber)) return false
-        val normalizedIncoming = PhoneNumberNormalizer.normalize(incomingNumber)
-        return getBlockedNumbers(context).contains(normalizedIncoming)
+        return getBlockedNumbers(context).contains(PhoneNumberNormalizer.normalize(incomingNumber))
     }
 }
