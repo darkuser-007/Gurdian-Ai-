@@ -36,6 +36,7 @@ set -euo pipefail
 
 PROJECT_ID="tutorsync-app"
 REPOSITORY="darkuser-007/Gurdian-Ai-"
+REPOSITORY_ID="1214406587"
 POOL_ID="github-actions"
 PROVIDER_ID="guardian-ai-main"
 SERVICE_ACCOUNT_ID="guardian-firestore-deployer"
@@ -66,17 +67,17 @@ gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
   --workload-identity-pool="$POOL_ID" \
   --display-name="Guardian AI main-only Firestore deployment" \
   --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.event_name=assertion.event_name,attribute.workflow_ref=assertion.workflow_ref" \
-  --attribute-condition="assertion.repository == '$REPOSITORY' && assertion.ref == 'refs/heads/main' && assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == '$REPOSITORY/.github/workflows/firebase-deploy.yml@refs/heads/main'"
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository_id=assertion.repository_id,attribute.ref=assertion.ref,attribute.event_name=assertion.event_name,attribute.workflow_ref=assertion.workflow_ref" \
+  --attribute-condition="assertion.repository_id == '$REPOSITORY_ID' && assertion.ref == 'refs/heads/main' && assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == '$REPOSITORY/.github/workflows/firebase-deploy.yml@refs/heads/main'"
 
 gcloud iam service-accounts add-iam-policy-binding "$SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_ID/attribute.repository/$REPOSITORY"
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_ID/attribute.repository_id/$REPOSITORY_ID"
 
-# Least-privilege permissions for the workflow's database preflight,
+# Read-only Firebase project metadata plus database preflight,
 # Firestore index changes, and Firestore Security Rules releases.
-for ROLE in roles/datastore.viewer roles/datastore.indexAdmin roles/firebaserules.admin; do
+for ROLE in roles/firebase.viewer roles/datastore.viewer roles/datastore.indexAdmin roles/firebaserules.admin; do
   gcloud projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$SERVICE_ACCOUNT" \
     --role="$ROLE"
