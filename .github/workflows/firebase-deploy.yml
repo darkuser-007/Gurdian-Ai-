@@ -47,6 +47,14 @@ jobs:
           import fs from 'node:fs';
           const app = JSON.parse(fs.readFileSync('firebase-applet-config.json', 'utf8'));
           const firebase = JSON.parse(fs.readFileSync('firebase.json', 'utf8'));
+          const provider = process.env.GCP_WORKLOAD_IDENTITY_PROVIDER.trim();
+          const providerProjectNumber = provider.match(/^projects\/(\d+)\//)?.[1];
+          if (providerProjectNumber !== app.messagingSenderId) {
+            console.error('GCP_WORKLOAD_IDENTITY_PROVIDER has the wrong Google Cloud project number.');
+            console.error('Expected prefix: projects/' + app.messagingSenderId + '/locations/global/workloadIdentityPools/...');
+            console.error('Use the project number from Firebase Project settings, not the example number in the guide.');
+            process.exit(1);
+          }
           const target = firebase.firestore?.find(
             item => item.database === process.env.FIRESTORE_DATABASE_ID
           );
