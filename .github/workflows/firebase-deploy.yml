@@ -27,7 +27,6 @@ jobs:
       FIRESTORE_DATABASE_ID: ai-studio-fd3caff6-b7f7-4567-a716-bbb4cb0f70d6
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
-      GITHUB_REPOSITORY_ID: "1214406587"
     steps:
       - name: Check out main
         uses: actions/checkout@v4
