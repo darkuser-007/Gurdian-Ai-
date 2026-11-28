@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_deployment:
-        description: "Type DEPLOY_FIRESTORE to deploy rules and indexes to tutorsync-app"
+        description: "Type DEPLOY_FIRESTORE to deploy rules and indexes to guardian-ai-db"
         required: true
         type: string
 
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: guardian-ai-firebase-firestore-production
+  group: guardian-ai-db-firestore-production
   cancel-in-progress: false
 
 jobs:
@@ -23,24 +23,24 @@ jobs:
       contents: read
       id-token: write
     env:
-      FIREBASE_PROJECT_ID: tutorsync-app
-      FIRESTORE_DATABASE_ID: ai-studio-fd3caff6-b7f7-4567-a716-bbb4cb0f70d6
+      FIREBASE_PROJECT_ID: guardian-ai-db
+      FIRESTORE_DATABASE_ID: (default)
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
     steps:
       - name: Check out main
         uses: actions/checkout@v4
 
-      - name: Validate deployment confirmation and configuration
+      - name: Validate deployment configuration
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$GCP_WORKLOAD_IDENTITY_PROVIDER" != projects/*/locations/global/workloadIdentityPools/*/providers/* ]]; then
-            echo "::error::Set the GCP_WORKLOAD_IDENTITY_PROVIDER repository variable to the full Google Workload Identity Provider resource name."
+            echo "::error::Set GCP_WORKLOAD_IDENTITY_PROVIDER to the full provider resource name for guardian-ai-db."
             exit 1
           fi
-          if [[ "$GCP_SERVICE_ACCOUNT" != *@tutorsync-app.iam.gserviceaccount.com ]]; then
-            echo "::error::Set GCP_SERVICE_ACCOUNT to the dedicated Firestore deployer service account in tutorsync-app."
+          if [[ "$GCP_SERVICE_ACCOUNT" != *@guardian-ai-db.iam.gserviceaccount.com ]]; then
+            echo "::error::Set GCP_SERVICE_ACCOUNT to a deployment service account in guardian-ai-db."
             exit 1
           fi
           node --input-type=module <<'NODE'
@@ -48,31 +48,27 @@ jobs:
           const app = JSON.parse(fs.readFileSync('firebase-applet-config.json', 'utf8'));
           const firebase = JSON.parse(fs.readFileSync('firebase.json', 'utf8'));
           const provider = process.env.GCP_WORKLOAD_IDENTITY_PROVIDER.trim();
-          const providerProjectNumber = provider.match(/^projects\/(\d+)\//)?.[1];
+          const providerProjectNumber = provider.match(/^projects\\/(\\d+)\\//)?.[1];
           if (providerProjectNumber !== app.messagingSenderId) {
-            console.error('GCP_WORKLOAD_IDENTITY_PROVIDER has the wrong Google Cloud project number.');
-            console.error('Expected prefix: projects/' + app.messagingSenderId + '/locations/global/workloadIdentityPools/...');
-            console.error('Use the project number from Firebase Project settings, not the example number in the guide.');
+            console.error('The Workload Identity provider must belong to Firebase project number ' + app.messagingSenderId + '.');
             process.exit(1);
           }
-          const target = firebase.firestore?.find(
-            item => item.database === process.env.FIRESTORE_DATABASE_ID
-          );
+          const target = firebase.firestore?.find(item => item.database === process.env.FIRESTORE_DATABASE_ID);
           if (app.projectId !== process.env.FIREBASE_PROJECT_ID || !target) {
-            console.error('App config and Firebase deployment target do not match the protected production project/database.');
+            console.error('Firebase app config and Firestore deployment target do not match guardian-ai-db/(default).');
             process.exit(1);
           }
           if (!fs.existsSync(target.rules) || !fs.existsSync(target.indexes)) {
             console.error('Configured Firestore rules or indexes file is missing.');
             process.exit(1);
           }
-          console.log('Target validated:', app.projectId, target.database);
+          console.log('Validated Firestore target:', app.projectId, target.database);
           NODE
 
       - name: Authenticate to Google Cloud with Workload Identity Federation
         uses: google-github-actions/auth@v3
         with:
-          project_id: tutorsync-app
+          project_id: guardian-ai-db
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
@@ -84,14 +80,14 @@ jobs:
       - name: Install Firebase CLI
         run: npm install --global firebase-tools@latest
 
-      - name: Verify the configured named Firestore database exists
+      - name: Verify the default Firestore database exists
         run: |
-          firebase firestore:databases:get "$FIRESTORE_DATABASE_ID" \
-            --project "$FIREBASE_PROJECT_ID" \
+          firebase firestore:databases:get "(default)" \
+            --project guardian-ai-db \
             --json
 
       - name: Deploy Firestore security rules and indexes
         run: |
           firebase deploy --only firestore \
-            --project "$FIREBASE_PROJECT_ID" \
+            --project guardian-ai-db \
             --non-interactive
