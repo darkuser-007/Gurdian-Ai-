@@ -48,7 +48,7 @@ jobs:
           const app = JSON.parse(fs.readFileSync('firebase-applet-config.json', 'utf8'));
           const firebase = JSON.parse(fs.readFileSync('firebase.json', 'utf8'));
           const provider = process.env.GCP_WORKLOAD_IDENTITY_PROVIDER.trim();
-          const providerProjectNumber = provider.match(/^projects\\/(\\d+)\\//)?.[1];
+          const providerProjectNumber = provider.split('/')[1];
           if (providerProjectNumber !== app.messagingSenderId) {
             console.error('The Workload Identity provider must belong to Firebase project number ' + app.messagingSenderId + '.');
             process.exit(1);
