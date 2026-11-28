@@ -6,8 +6,8 @@ function makeIdToken(overrides: Record<string, unknown> = {}) {
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
   const claims = {
-    aud: "tutorsync-app",
-    iss: "https://securetoken.google.com/tutorsync-app",
+    aud: "guardian-ai-db",
+    iss: "https://securetoken.google.com/guardian-ai-db",
     sub: "guardian-test-user",
     iat: now,
     exp: now + 3600,
