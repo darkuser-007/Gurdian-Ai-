@@ -23,7 +23,7 @@ Guardian AI is a browser-based voice-security prototype for reviewing user-submi
 - Microphone visualizer; the visualizer itself is not a deepfake detector.
 - Android 10+ companion that can reject exact caller-ID matches from a user-managed local blocklist after the user grants Android's call-screening role.
 
-## Important product limitations — explain these honestly
+## Important product limitations
 
 - Gemini's result is a screening aid, not a validated anti-spoofing classifier, forensic certification, or proof that a voice is authentic or fake.
 - A screening concern score is not a calibrated probability or measured accuracy percentage.
@@ -32,17 +32,17 @@ Guardian AI is a browser-based voice-security prototype for reviewing user-submi
 - There is no deployed or benchmark-validated AASIST/TFLite anti-spoofing model.
 - Consequential decisions should be independently verified through a trusted second channel.
 
-## Local development
+## Browser-based development
 
-**Prerequisites:** Node.js 20+ and a Gemini API key.
+The project can be developed using GitHub Codespaces, StackBlitz, or another browser-based Node.js environment. No local software installation is required.
 
-1. Install dependencies: `npm ci`
-2. Copy `.env.example` to `.env` and set `GEMINI_API_KEY`.
-3. The server reads the Firebase Web API key from `firebase-applet-config.json`. Set `FIREBASE_WEB_API_KEY` only when you need to override it.
-4. Start the app and local API server: `npm run dev`
-5. Open the local URL printed by Vite.
+1. Import or open the public GitHub repository.
+2. Use Node.js 20 or newer in the hosted workspace.
+3. Install dependencies with `npm ci`.
+4. Add `GEMINI_API_KEY` using the platform's encrypted secrets/environment-variable UI. Never commit a populated `.env` file or expose the key in a `VITE_*` variable.
+5. Start the app with `npm run dev`; the Express/Vite server listens on port 3000 by default.
 
-The Gemini key stays on the server. Do not add it to a `VITE_*` variable or commit a populated `.env` file.
+The Gemini key stays on the server. The Firebase web configuration is public client configuration; Firebase Security Rules and Authentication provide access control.
 
 ## Audio analysis API
 
@@ -73,6 +73,32 @@ Responses:
 - `429`: per-instance per-user rate limit reached.
 - `503`: Firebase Authentication or Gemini server configuration is unavailable.
 
+## Firebase project
+
+The active web app configuration targets **`guardian-ai-db`**. Firestore is configured to use the **`(default)`** database.
+
+Before deployment, complete these one-time Firebase Console steps in the `guardian-ai-db` project:
+
+1. Enable **Authentication → Sign-in method → Google** and set a support email.
+2. Add the production Vercel hostname and any hosted preview hostname to **Authentication → Settings → Authorized domains**.
+3. Confirm Cloud Firestore exists as the `(default)` database.
+4. Review and publish the repository's `firestore.rules` rules.
+
+The repository includes `firebase.json`, `firestore.rules`, and `firestore.indexes.json`.
+
+### GitHub Actions Firestore deployment
+
+The manual workflow `.github/workflows/firebase-deploy.yml` deploys only Firestore rules and indexes to `guardian-ai-db/(default)`. It uses Google Workload Identity Federation, not a downloaded service-account private key.
+
+Configure these GitHub Actions repository variables after creating the deployment identity in the **guardian-ai-db** Google Cloud project:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`: full provider resource name for the GitHub OIDC provider in project number `999545069600`.
+- `GCP_SERVICE_ACCOUNT`: deployment service-account email ending in `@guardian-ai-db.iam.gserviceaccount.com`.
+
+The provider must restrict access to repository ID `1214406587`, branch `refs/heads/main`, and workflow `piyushsiingh/Gurdian-Ai-/.github/workflows/firebase-deploy.yml@refs/heads/main`. Grant only the roles required to deploy Firestore rules and indexes. Do not reuse the old `tutorsync-app` service account or provider.
+
+To deploy, manually run the GitHub Actions workflow on `main` and enter `DEPLOY_FIRESTORE` when prompted. The workflow validates that the Firebase web config, project number, database ID, rules, and indexes all agree before authenticating and deploying.
+
 ## Vercel deployment
 
 Configure these Environment Variables in the Vercel project:
@@ -81,17 +107,6 @@ Configure these Environment Variables in the Vercel project:
 - `FIREBASE_WEB_API_KEY` (optional override; otherwise read from the Firebase app config file)
 
 A commit to the connected GitHub deployment branch should trigger a Vercel deployment. Confirm the deployment is Ready before presenting. Redeploy after changing environment variables. Audio uploads are limited to 3 MB. Rate limiting is bounded in memory and per function instance; it is not a global quota. Use a shared rate-limit store before scaling to high traffic.
-
-## Firebase rules and indexes
-
-The repository includes `firebase.json`, `firestore.rules`, and `firestore.indexes.json`. Confirm in Firebase Console that `tutorsync-app` and the configured named database are the intended production resources before deploying.
-
-```bash
-npx firebase-tools login
-npx firebase-tools deploy --project tutorsync-app --only firestore
-```
-
-This command deploys the rules and composite history index for the database configured in `firebase.json`. A successful Vercel build does not deploy Firestore resources. See [docs/ENGINEERING.md](docs/ENGINEERING.md) for the full data model and operating notes.
 
 ## Security and data
 
