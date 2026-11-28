@@ -1,10 +1,9 @@
 {
-  "projectId": "tutorsync-app",
-  "appId": "1:451348264144:web:26f3caf17cffe65751dad5",
-  "apiKey": "AIzaSyAkXv6IgW3f7vufHJK95sXO3PLO1SZr53I",
-  "authDomain": "tutorsync-app.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-fd3caff6-b7f7-4567-a716-bbb4cb0f70d6",
-  "storageBucket": "tutorsync-app.firebasestorage.app",
-  "messagingSenderId": "451348264144",
-  "measurementId": ""
+  "projectId": "guardian-ai-db",
+  "appId": "1:999545069600:web:fca615445a650db69f5c45",
+  "apiKey": "AIzaSyCM7YCbZFjg9QZLLg9_iLiDl1Tbs-MHe6I",
+  "authDomain": "guardian-ai-db.firebaseapp.com",
+  "storageBucket": "guardian-ai-db.firebasestorage.app",
+  "messagingSenderId": "999545069600",
+  "measurementId": "G-RKQGSLJR6T"
 }
